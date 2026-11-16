@@ -1,0 +1,1690 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pathnote</title>
+<style>
+:root {
+  --bg: #ffffff; --surface: #f5f5f7; --ink: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --node: #c7c7cc;
+  --accent: #0066cc; --accent-soft: rgba(0, 102, 204, 0.12); --warn: #b3261e; --out: #b25000; --world: #7a3db8;
+  --font: "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", Inter, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #000; --surface: #1d1d1f; --ink: #f5f5f7; --muted: #a1a1a6; --line: #3a3a3c; --node: #48484a;
+    --accent: #2997ff; --accent-soft: rgba(41, 151, 255, 0.16); --warn: #ff6b5b; --out: #ff9f0a; --world: #bf8cff; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 400 14px/1.43 var(--font); display: flex; flex-direction: column; }
+.bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.bar strong { font-weight: 600; }
+.vault { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 10px; border-radius: 9999px; background: var(--surface); color: var(--muted); }
+.chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.chip.on { background: var(--accent-soft); color: var(--accent); }
+.chip.on i { background: var(--accent); }
+.main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px; }
+.graph { position: relative; min-width: 0; min-height: 0; border-right: 1px solid var(--line); overflow: hidden; }
+svg { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; transform-origin: 0 0; will-change: transform; }
+svg.drag { cursor: grabbing; }
+.note { position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 10px 14px; border-radius: 11px; background: var(--surface); color: var(--muted); font-size: 12px; }
+.note b { color: var(--ink); font-weight: 600; }
+.empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 24px; text-align: center; pointer-events: none; }
+.empty.low { place-items: end center; padding-bottom: 32px; } /* under the folders' dots, not over them */
+.log { display: flex; flex-direction: column; min-height: 0; }
+.log h2 { font-size: 14px; font-weight: 600; margin: 0; padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
+ol { list-style: none; margin: 0; padding: 8px 0; flex: 1; min-height: 0; overflow-y: auto; }
+li { padding: 8px 16px; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; }
+li.now { background: var(--accent-soft); }
+.tool { font: 500 12px var(--mono); color: var(--accent); }
+.undo .tool { color: var(--muted); }
+time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.text { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.why { grid-column: 1 / -1; color: var(--muted); }
+/* Plain words by default; the calls as made (commands, tool names, internal steps) in developer mode */
+.log:not(.dev) .d, .log.dev .p, .log:not(.dev) li.quiet { display: none; }
+.tool .p { font-family: var(--font); }
+#dev[aria-pressed="true"], #allFiles[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.log h2 { flex-wrap: wrap; gap: 8px; }
+.log h2 .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.log h2 .btn { white-space: nowrap; }
+.err { grid-column: 1 / -1; color: var(--warn); font-size: 12px; }
+li .btn { grid-column: 1 / -1; justify-self: start; margin-top: 4px; }
+.btn { font: 400 13px/1 var(--font); min-height: 30px; padding: 0 14px; border-radius: 9999px; border: 1px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer; }
+.btn:active { transform: scale(0.95); }
+.btn:focus-visible { outline: 2px solid #0071e3; outline-offset: 2px; }
+.btn:disabled { opacity: .4; cursor: default; }
+.hint { padding: 16px; color: var(--muted); }
+/* What was said: the request that starts a turn, and Claude's replies. Long ones are cut to a few lines */
+li.ask { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 12px; }
+li.ask .text { font-weight: 600; }
+li.ask .tool, li.say .tool { font-family: var(--font); }
+li.say .text { color: var(--muted); }
+li.ask .text, li.say .text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+li.failed .tool { color: var(--warn); }
+
+/* --k = user units per screen pixel, so names, rings and the pulse keep their on-screen size while zooming.
+   It is set only on their layers (see setView): changing it restyles every element under it, and dots don't need it */
+svg { --k: 1; }
+line { vector-effect: non-scaling-stroke; }
+.tree { stroke: var(--line); stroke-width: 1; }
+/* Lines and dimmed nodes fade with stroke-/fill-opacity, not opacity: opacity on thousands of elements makes
+   Chrome treat each as its own layer to sort out on every repaint (hundreds of ms on a click or Escape) */
+.link { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 4; stroke-opacity: .35; }
+.trail { stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; transition: stroke-dashoffset .6s ease-in-out, opacity .4s, stroke-opacity .4s; }
+.src { stroke: var(--accent); stroke-width: 1.5; stroke-opacity: .6; }
+.node .dot, .node .hole { fill: none; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+/* A dot is a zero-length line with round ends and a stroke that doesn't scale, so it keeps its on-screen size at any zoom
+   without --k: zooming then restyles a few thousand names instead of every dot as well (about 60ms down to 25 on 5,000 files) */
+.node .dot { stroke: var(--node); stroke-width: 7px; transition: stroke .5s; }
+.node.dir .dot { stroke-width: 10px; }
+.node.root .dot { stroke-width: 16px; stroke: var(--ink); }
+/* Places the AI goes that aren't files (the terminal, the web, other apps) sit on a ring around the AI in the middle.
+   They are hollow: a smaller dot in the background colour on top */
+.node.place .dot { stroke-width: 14px; stroke: var(--ink); }
+.node.place .hole { stroke-width: 11px; stroke: var(--bg); }
+.node.ai .dot { stroke-width: 21px; stroke: var(--accent); }
+.node.ai .hole { stroke-width: 16px; }
+/* Sites and services outside this computer, around the place that reached them */
+.node.site .dot, .node.site.visited .dot { stroke-width: 10px; stroke: var(--world); }
+.node.site .hole { stroke-width: 7px; stroke: var(--bg); }
+.node.site.app .dot { stroke-width: 14px; }
+.node.site.app .hole { stroke-width: 9px; }
+.node.site.out .dot, .node.site.out.visited .dot { stroke: var(--out); }
+.node.site text { fill: var(--world); }
+/* the line between this computer and the outside: sites and other apps' services live beyond it */
+.edge { fill: none; stroke: var(--world); stroke-width: 1.5; stroke-dasharray: 5 7; stroke-opacity: .45; vector-effect: non-scaling-stroke; }
+.edgeName { fill: var(--world); font: 600 12px var(--font); text-anchor: middle; opacity: .8; }
+/* The blueprint panel: one piece of work as a mind map and as text another agent can follow */
+.bp { position: absolute; inset: 0; z-index: 4; background: var(--bg); overflow-y: auto; padding: 14px 16px 20px; display: grid; gap: 10px; align-content: start; }
+.bp header { display: flex; align-items: center; gap: 8px; }
+.bp header b { flex: 1; font-size: 15px; }
+.bp .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.bp select, .bp input { font: 13px var(--font); min-height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); min-width: 0; flex: 1 1 160px; }
+.bp label { font-size: 12px; color: var(--muted); display: grid; gap: 3px; flex: 1 1 160px; }
+.bp textarea { font: 12px/1.5 var(--mono); min-height: 220px; padding: 10px; border-radius: 11px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); resize: vertical; width: 100%; }
+.bp svg { width: 100%; height: auto; border-radius: 11px; background: var(--surface); }
+.bp .say { font-size: 12px; color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
+.bp .say.bad { color: var(--warn); }
+.bp [hidden] { display: none; }
+.pn circle:first-child { fill: var(--node); }
+.pn.place circle:first-child { fill: var(--bg); stroke: var(--ink); stroke-width: 3.5; }
+.pn.file.written circle:first-child { fill: var(--accent); }
+.pn.site circle:first-child, .pn.app circle:first-child { fill: var(--bg); stroke: var(--world); stroke-width: 3; }
+.pn.site.out circle:first-child, .pn.app.out circle:first-child { stroke: var(--out); }
+.pai { fill: var(--accent); }
+.pl { fill: var(--muted); font: 12px var(--font); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.pn.place .pl, .pn.written .pl, .pai-t { fill: var(--ink); font-weight: 600; }
+.pn.site .pl, .pn.app .pl { fill: var(--world); }
+.pn.out .pl { fill: var(--out); }
+.pflow { stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; opacity: .85; }
+.phead, .pdot { fill: var(--accent); }
+.pflow.out { stroke: var(--out); } .phead.out, .pdot.out { fill: var(--out); }
+.pflow.bad { stroke: var(--warn); } .phead.bad, .pdot.bad { fill: var(--warn); }
+.pt { fill: var(--ink); font: 600 15px var(--font); }
+.pg { fill: var(--muted); font: 12px var(--font); }
+.ph { fill: var(--ink); font: 600 12px var(--font); }
+.ps { fill: var(--muted); font: 12px var(--font); }
+.ps.out { fill: var(--out); font-weight: 600; } .ps.bad { fill: var(--warn); }
+.tree.world { stroke: var(--world); stroke-opacity: .5; stroke-dasharray: 2 4; }
+li.out { box-shadow: inset 3px 0 0 var(--out); }
+/* Each request with what came of it; its steps fold away under it */
+li.folded { display: none; }
+/* Suggestions: steps or requests worth doing differently, in red, with a ripple on the map */
+li.flag { box-shadow: inset 3px 0 0 var(--warn); }
+.flagwhy { grid-column: 1 / -1; color: var(--warn); font-size: 12px; font-weight: 600; }
+li.flag.fresh { animation: flagpulse 1.2s ease-out 2; }
+@keyframes flagpulse { 0% { background: color-mix(in srgb, var(--warn) 22%, transparent); } 100% { background: transparent; } }
+.sum .stats .s { color: var(--warn); }
+.ripple { fill: none; stroke: var(--warn); stroke-width: 2.5; vector-effect: non-scaling-stroke; animation: ripple 1.6s ease-out 3; opacity: 0; }
+.ripple.r2 { animation-delay: .5s; }
+.flagring { fill: none; stroke: var(--warn); stroke-width: 2; vector-effect: non-scaling-stroke; }
+@keyframes ripple { 0% { r: 8px; opacity: .9; } 100% { r: 44px; opacity: 0; } }
+/* The flow of one request: numbered arrows along the way it went */
+.flowline { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; vector-effect: non-scaling-stroke; opacity: .9; }
+.flowhead { fill: var(--accent); }
+.flownum { fill: #fff; font: 700 9px var(--font); text-anchor: middle; dominant-baseline: central; }
+.flowdot { fill: var(--accent); }
+.sum { grid-column: 1 / -1; display: grid; gap: 4px; margin-top: 6px; }
+.sum .res { color: var(--ink); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.sum .res:empty, .sum .stats:empty { display: none; }
+.sum .stats { font-size: 12px; color: var(--muted); }
+#log a { color: var(--accent); overflow-wrap: anywhere; }
+.sum .stats b { font-weight: 600; }
+.sum .stats .o { color: var(--out); }
+.sum .stats .f { color: var(--warn); }
+.sum .more { justify-self: start; font: 12px var(--font); color: var(--accent); background: none; border: 0; padding: 2px 0; cursor: pointer; }
+li.ask .text { font-size: 15px; }
+.outtag { grid-column: 1 / -1; color: var(--out); font-size: 12px; font-weight: 600; }
+.node.place.visited .hole { display: none; }
+.node.place text { font-weight: 600; fill: var(--ink); }
+.node text { font-family: var(--font); font-size: calc(var(--k) * 11px); fill: var(--muted); paint-order: stroke; stroke: var(--bg); stroke-width: calc(var(--k) * 4px); stroke-linejoin: round; pointer-events: none; display: none; }
+.node.root text { font-size: calc(var(--k) * 13px); font-weight: 600; fill: var(--ink); }
+.node.root text, .node.place text, .node.top text, .node.hit text, .node.visited text, .node.written text, svg.near .node.dir text, svg.close .node text { display: inline; }
+/* a name that would sit on a more important one stays hidden (see declutter) */
+.node.crowd text { display: none !important; }
+.ring { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 3; opacity: 0; r: calc(var(--k) * 11px); vector-effect: non-scaling-stroke; }
+.node.hit .ring { opacity: 1; }
+.node.visited .dot, .node.written .dot { stroke: var(--accent); }
+.node.visited text, .node.written text { fill: var(--ink); font-weight: 600; }
+/* One pulse for the whole map, moved to the current node and drawn last. Its animation runs on the GPU;
+   giving each node its own and restarting it on every event made the browser re-split the whole map into
+   layers on each event (~100ms with thousands of files), and anything drawn above it gets split off too */
+.pulse { r: calc(var(--k) * 6px); fill: var(--accent); opacity: 0; animation: pulse 1.2s ease-out infinite; transform-box: fill-box; transform-origin: center; pointer-events: none; }
+#pulse.gone { opacity: .25; }
+svg.focus #pulse { opacity: .15; }
+svg.focus #pulse.lit { opacity: 1; }
+.node.gone { opacity: .25; }
+.node.gone text { text-decoration: line-through; }
+/* Selecting: a log entry or a dot lights its files and connections and dims the rest */
+/* opacity: 1 also keeps a gone node at the same dim as the rest while selecting, as before */
+svg.focus .node { opacity: 1; fill-opacity: .15; stroke-opacity: .15; }
+svg.focus .node.lit { fill-opacity: 1; stroke-opacity: 1; }
+svg.focus .node.lit text { display: inline; fill: var(--ink); font-weight: 600; }
+svg.focus line { stroke-opacity: .1; }
+svg.focus line.lit { stroke-opacity: 1; stroke-width: 2.5; }
+svg.focus .tree.lit, svg.focus .link.lit { stroke: var(--accent); }
+.node.sel .dot { stroke: var(--accent); stroke-width: 12px; }
+.node.sel .ring { opacity: 1; stroke-dasharray: none; }
+li[tabindex] { cursor: pointer; }
+li[tabindex]:hover { background: var(--surface); }
+li.touch { box-shadow: inset 3px 0 var(--accent); }
+li.sel { background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
+li:focus-visible { outline: 2px solid #0071e3; outline-offset: -2px; }
+.controls { position: absolute; right: 12px; top: 12px; display: grid; gap: 6px; }
+.controls button { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: 400 18px/1 var(--font); cursor: pointer; display: grid; place-items: center; padding: 0; }
+.controls button:active { transform: scale(0.95); }
+.controls button:focus-visible { outline: 2px solid #0071e3; outline-offset: 2px; }
+.controls svg { width: 16px; height: 16px; cursor: inherit; }
+.card { position: absolute; left: 12px; top: 12px; max-width: min(360px, calc(100% - 24px)); padding: 12px 14px; border-radius: 11px; background: var(--surface); display: grid; gap: 4px; }
+.card b { font-weight: 600; overflow-wrap: anywhere; }
+.card span { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.card .row { display: flex; gap: 8px; margin-top: 6px; }
+/* The AI asks to use another folder: on top of everything until the user answers */
+.asking { position: absolute; z-index: 3; top: 12px; left: 50%; transform: translateX(-50%); width: min(440px, calc(100% - 24px)); padding: 14px 16px; border-radius: 14px; background: var(--bg); border: 1.5px solid var(--accent); box-shadow: 0 8px 28px rgba(0, 0, 0, .18); display: grid; gap: 6px; }
+.asking b { font-weight: 600; }
+.asking code { font: 13px var(--mono); overflow-wrap: anywhere; }
+.asking span { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.asking .row { display: flex; gap: 8px; margin-top: 6px; }
+.btn.primary { background: var(--accent); color: #fff; }
+@keyframes pulse { from { transform: scale(1); opacity: .35; } to { transform: scale(3.2); opacity: 0; } }
+/* New entries slide in and the card fades in, so the panel moves instead of jumping */
+#log li { animation: enter .45s ease-out; }
+/* names that appear as the agent reaches a file fade in rather than pop (only these few, not the whole map) */
+.node.hit text, .node.visited text, .node.written text { animation: fade .5s ease-out; }
+@keyframes fade { from { opacity: 0; } }
+@keyframes enter { from { opacity: 0; transform: translateY(10px); } }
+.card { animation: show .2s ease-out; }
+@keyframes show { from { opacity: 0; transform: translateY(-4px); } }
+@media (max-width: 760px) {
+  .main { grid-template-columns: 1fr; grid-template-rows: 55% 45%; }
+  .graph { border-right: 0; border-bottom: 1px solid var(--line); }
+}
+/* Narrow windows and touch screens: buttons big enough to hit with a finger, with room between them */
+@media (max-width: 760px), (pointer: coarse) {
+  .controls { right: 14px; top: 14px; gap: 12px; }
+  .controls button { width: 46px; height: 46px; font-size: 24px; }
+  .controls svg { width: 20px; height: 20px; }
+  .btn { min-height: 40px; padding: 0 18px; font-size: 15px; }
+  li .btn { margin-top: 8px; }
+  .card { padding: 14px 16px; gap: 6px; }
+  .card b { font-size: 16px; }
+  .card span { font-size: 13px; }
+  .card .row { margin-top: 8px; }
+}
+/* Narrow: the card sits low and flat, name and info beside the button, so it doesn't cover the lit dots */
+@media (max-width: 760px) {
+  .card { top: auto; bottom: 12px; right: 72px; max-width: none; /* right: clear of the zoom buttons */ grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; padding: 10px 12px 10px 16px; }
+  .card b, .card span { grid-column: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #cardPath { display: none; }
+  .card .row { grid-column: 2; grid-row: 1 / span 3; margin: 0; flex-direction: column; align-items: end; }
+  .card .err { white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <strong>Pathnote</strong>
+  <span class="vault" id="roots"></span>
+  <button class="btn" id="allFiles" type="button" aria-pressed="false"></button>
+  <span class="chip" id="status"><i></i><span id="statusText"></span></span>
+</div>
+<div class="main">
+  <div class="graph">
+    <svg id="g" role="img"></svg>
+    <div class="empty" id="empty" hidden></div>
+    <p class="note" id="note" hidden></p>
+    <div class="controls">
+      <button type="button" id="home"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M2.5 7.5 8 3l5.5 4.5V13h-3.5V9.5h-4V13H2.5z"/></svg></button>
+      <button type="button" id="zoomIn">+</button>
+      <button type="button" id="zoomOut">−</button>
+    </div>
+    <div class="asking" id="ask" role="alertdialog" aria-labelledby="askTitle" hidden>
+      <b id="askTitle"></b><code id="askPath"></code><span id="askWhy"></span><span id="askHint"></span>
+      <div class="row"><button class="btn primary" id="askYes" type="button"></button><button class="btn" id="askNo" type="button"></button></div>
+    </div>
+    <section class="bp" id="bp" hidden aria-labelledby="bpTitle">
+      <header><b id="bpTitle"></b><button class="btn" id="bpClose" type="button"></button></header>
+      <div class="row">
+        <label><span id="bpSessionL"></span><select id="bpSession"></select></label>
+        <label><span id="bpFromL"></span><select id="bpFrom"></select></label>
+        <label><span id="bpToL"></span><select id="bpTo"></select></label>
+      </div>
+      <svg id="bpMap" viewBox="0 0 960 600" role="img"></svg>
+      <label><span id="bpNameL"></span><input id="bpName"></label>
+      <textarea id="bpText" spellcheck="false"></textarea>
+      <div class="row">
+        <button class="btn primary" id="bpUpdate" type="button" hidden></button><button class="btn primary" id="bpClaude" type="button"></button><button class="btn" id="bpCodex" type="button"></button>
+        <button class="btn" id="bpFile" type="button"></button><button class="btn" id="bpPolish" type="button"></button>
+      </div>
+      <p class="say" id="bpSay" role="status"></p>
+    </section>
+    <div class="card" id="card" hidden>
+      <b id="cardName"></b><span id="cardPath"></span><span id="cardInfo"></span>
+      <div class="row"><button class="btn" id="reveal" type="button"></button><span class="err" id="cardErr"></span></div>
+    </div>
+  </div>
+  <div class="log">
+    <h2><span id="logTitle"></span><span class="row"><button class="btn" id="trOn" type="button" hidden></button><button class="btn" id="bpOpen" type="button"></button><button class="btn" id="dev" type="button" aria-pressed="false"></button><button class="btn" id="clear" type="button"></button></span></h2>
+    <ol id="log" aria-live="polite"></ol>
+    <p class="hint" id="hint"></p>
+  </div>
+</div>
+<script>
+// ?lang=ko or ?lang=en picks the page's language; otherwise the browser's
+const ko = (new URLSearchParams(location.search).get('lang') || navigator.language || '').toLowerCase().startsWith('ko');
+const mac = /Mac/.test(navigator.platform || navigator.userAgent);
+const L = ko ? {
+  live: '연결됨', off: '연결 끊김', activity: '작업 기록', clear: '경로 지우기', undo: '되돌리기', undone: '되돌림',
+  wait: 'AI가 연결된 폴더에서 일하면 요청, 답, 명령, 파일까지 모든 단계가 여기에 쌓입니다.', empty: '연결된 폴더가 비어 있습니다.',
+  you: '요청', claude: 'Claude', failed: '실패: ', ai: 'AI', places: { shell: '터미널', web: '웹', agent: '하위 에이전트', files: '연결 폴더 밖의 파일', claude: 'Claude Code', browser: '브라우저', schedule: '예약 작업' },
+  outTag: '바깥에 흔적이 남는 행동 (올리기, 배포, 보내기, 삭제 등)', openSite: '사이트 열기', gitRemote: 'Git 저장소',
+  outside: '바깥 (인터넷과 다른 앱)',
+  more: '자세히 보기',
+  sug: '제안: ', repeated: n => `같은 단계를 ${n}번 했습니다. 한 번에 처리할 방법이 있었는지 살펴보세요.`, retried: '실패한 방법을 그대로 다시 시도했습니다. 원인을 먼저 확인하는 편이 빠릅니다.',
+  reread: n => `같은 파일을 ${n}번 읽었습니다. 한 번 읽고 기억해 두면 됩니다.`, corrected: '바로 다음 요청에서 바로잡았습니다. 처음 요청에 조건을 더 적었으면 한 번에 끝났을 수 있습니다.',
+  undoneSug: '이 변경은 나중에 되돌렸습니다. 필요 없는 변경이었을 수 있습니다.', sugCount: n => `제안 ${n}개`, fileTool: { read: '읽기', write: '쓰기', edit: '수정', search: '파일 검색', list: '폴더 보기', move: '옮기기' }, less: '접기', resultL: '결과: ', trOn: '한국어로 보기', trGet: p => `번역 준비 중 ${p}%`,
+  stats: (n, o, f, w) => [`단계 ${n}개`, o && `<b class="o">바깥에 흔적 ${o}번</b>`, f && `<b class="f">실패 ${f}번</b>`, w.length && `접속: ${w.slice(0, 3).join(', ')}${w.length > 3 ? ` 외 ${w.length - 3}곳` : ''}`].filter(Boolean).join(', '),
+  bp: '설계도', bpTitle: '작업 설계도: 다른 에이전트가 그대로 따라 할 수 있게', close: '닫기', bpSession: '어느 작업', bpFrom: '이 요청부터', bpTo: '여기 전까지', toEnd: '끝까지',
+  bpName: '이름 (스킬과 파일 이름이 됩니다)', bpClaude: 'Claude Code 스킬로 저장', bpCodex: 'Codex 프롬프트로 저장', bpFile: '파일로 저장', bpPolish: 'AI로 다듬기',
+  bpLoading: '기록을 읽는 중입니다.', bpNone: '아직 Claude Code 작업이 지도에 나타나지 않았습니다.', bpSaved: f => `저장했습니다: ${f}`, copied: 'AI에게 붙여 넣을 요청을 복사했습니다. 다듬어진 답을 아래 글에 붙여 넣으세요.',
+  bpSavedClaude: n => `Claude Code에서 "${n} 설계도대로 해줘"라고 하면 됩니다.`, bpWork: '기록한 작업', bpSkills: 'Claude Code 스킬', bpUpdate: '이 스킬에 고쳐 저장', bpUpdated: (f, b) => `저장했습니다: ${f}. 고치기 전 내용은 ${b}에 있습니다.`, bpSavedCodex: n => `Codex에서 /${n} 으로 부르면 됩니다.`,
+  bpPrompt: '아래는 Pathnote가 실제 작업 기록으로 만든 설계도 초안입니다. 다른 에이전트가 처음 봐도 그대로 따라 할 수 있게 다듬어 주세요. 비슷한 단계는 묶고, 단계마다 무엇을 왜 하는지 한 줄로 쓰고, 바깥에 흔적이 남는 단계의 확인 표시는 그대로 두고, 함정은 피하는 방법으로 바꿔 써 주세요. 맨 위 --- 부분을 포함한 형식은 그대로 두고, 마크다운으로만 답해 주세요.',
+  mm: { goal: '목표', prepare: '준비물', steps: '순서', outside: '바깥', results: '결과물', pitfalls: '함정', more: n => `외 ${n}개` },
+  dev: '개발자 모드', ran: '터미널에서 명령을 실행했습니다', browsed: '브라우저를 조작했습니다', stepFailed: '이 단계는 실패했습니다',
+  searched: q => `"${q}" 검색`, fetched: h => `${h} 페이지를 읽었습니다`, delegated: d => d ? `하위 에이전트에게 맡김: ${d}` : '하위 에이전트에게 일을 맡겼습니다',
+  skill: k => `${k} 스킬을 사용했습니다`, read: f => `${f} 읽음`, wrote: f => `${f} 작성`, edited: f => `${f} 수정`, looked: q => `"${q}" 파일 찾기`,
+  search: (q, n) => `"${q}" ${n}개 찾음`, created: '새 파일', graph: '연결된 폴더 구조와 AI가 지나간 경로',
+  capped: n => `파일이 많아 ${n}개까지만 그렸습니다.`, folders: n => `폴더 ${n}개`,
+  home: '처음 보기', zoomIn: '확대', zoomOut: '축소',
+  allFiles: '모든 파일 보기', allFilesTip: '꺼 두면 AI가 찾고, 읽고, 쓴 파일과 그 폴더만 그립니다.', fresh: 'AI가 찾고, 읽고, 쓴 파일과 다녀간 사이트가 작업하는 동안 여기에 하나씩 더해집니다.',
+  old: 'Pathnote가 이전 버전으로 실행 중입니다. Claude(또는 Pathnote를 실행한 앱)를 다시 시작하세요.',
+  reveal: mac ? 'Finder에서 보기' : '폴더에서 보기', links: n => `연결 ${n}개`, steps: n => `작업 기록 ${n}개`,
+  ask: 'AI가 이 폴더도 쓰려고 합니다', askHint: '허락하면 AI가 이 폴더의 파일을 찾고 읽고 쓸 수 있습니다. 나중에 바꾸려면 ~/.pathnote/folders.json 을 고치세요.',
+  yes: '허락', no: '거절', connected: '폴더 연결', declined: '거절함', expired: '답이 없어 넘어감',
+  blocked: 'macOS가 막고 있어 비어 보이는 폴더: ', allow: ' 시스템 설정 → 개인정보 보호 및 보안 → 파일 및 폴더에서 Pathnote를 실행하는 앱(Claude 등)에 허용한 뒤 새로고침하세요.'
+} : {
+  live: 'Live', off: 'Disconnected', activity: 'Activity', clear: 'Clear path', undo: 'Undo', undone: 'undone',
+  wait: 'When the AI works in your folders, every step shows up here: requests, replies, commands and files.', empty: 'The connected folders are empty.',
+  you: 'Request', claude: 'Claude', failed: 'Failed: ', ai: 'AI', places: { shell: 'Terminal', web: 'Web', agent: 'Subagents', files: 'Files outside your folders', claude: 'Claude Code', browser: 'Browser', schedule: 'Scheduled tasks' },
+  outTag: 'Leaves a mark outside this computer (upload, deploy, send, delete…)', openSite: 'Open site', gitRemote: 'Git remote',
+  outside: 'Outside this computer (internet and other apps)',
+  more: 'Show steps',
+  sug: 'Suggestion: ', repeated: n => `The same step ${n} times. See whether one step could have done it.`, retried: 'Tried again the way that had just failed. Finding the cause first is quicker.',
+  reread: n => `Read the same file ${n} times. Once is enough if it's kept in mind.`, corrected: 'The next request corrected this one. Saying more up front might have done it in one go.',
+  undoneSug: 'This change was undone later, so it may not have been needed.', sugCount: n => `${n} suggestion${n === 1 ? '' : 's'}`, fileTool: { read: 'Read', write: 'Write', edit: 'Edit', search: 'Search', list: 'Folder', move: 'Move' }, less: 'Fold', resultL: 'Result: ', trOn: 'Show in Korean', trGet: p => `Getting the translator ${p}%`,
+  stats: (n, o, f, w) => [`${n} step${n === 1 ? '' : 's'}`, o && `<b class="o">${o} leaving a mark outside</b>`, f && `<b class="f">${f} failed</b>`, w.length && `reached ${w.slice(0, 3).join(', ')}${w.length > 3 ? ` and ${w.length - 3} more` : ''}`].filter(Boolean).join(', '),
+  bp: 'Blueprint', bpTitle: 'Blueprint: a piece of work another agent can follow', close: 'Close', bpSession: 'Which work', bpFrom: 'From this request', bpTo: 'Until before', toEnd: 'the end',
+  bpName: 'Name (becomes the skill and file name)', bpClaude: 'Save as a Claude Code skill', bpCodex: 'Save as a Codex prompt', bpFile: 'Save as a file', bpPolish: 'Polish with AI',
+  bpLoading: 'Reading the record…', bpNone: 'No Claude Code work has shown up on the map yet.', bpSaved: f => `Saved: ${f}`, copied: 'Copied a request to paste into your AI. Paste its answer into the text below.',
+  bpSavedClaude: n => `In Claude Code, ask it to follow the ${n} blueprint.`, bpWork: 'Recorded work', bpSkills: 'Claude Code skills', bpUpdate: 'Save over this skill', bpUpdated: (f, b) => `Saved: ${f}. The skill before your edit is in ${b}.`, bpSavedCodex: n => `In Codex, call it with /${n}.`,
+  bpPrompt: 'Below is a draft blueprint Pathnote made from the record of a real piece of AI work. Polish it so another agent can follow it on first read: group similar steps, give each step one line on what it does and why, keep the marks on steps that leave something outside, and turn pitfalls into how to avoid them. Keep the format, including the --- block at the top, and answer with the Markdown only.',
+  mm: { goal: 'Goal', prepare: 'Before', steps: 'Steps', outside: 'Outside', results: 'Results', pitfalls: 'Pitfalls', more: n => `${n} more` },
+  dev: 'Developer mode', ran: 'Ran a command in the terminal', browsed: 'Used the browser', stepFailed: 'This step failed',
+  searched: q => `Searched the web for "${q}"`, fetched: h => `Read a page on ${h}`, delegated: d => d ? `Handed to a subagent: ${d}` : 'Handed work to a subagent',
+  skill: k => `Used the ${k} skill`, read: f => `Read ${f}`, wrote: f => `Wrote ${f}`, edited: f => `Edited ${f}`, looked: q => `Looked for files: "${q}"`,
+  search: (q, n) => `"${q}": ${n} found`, created: 'new file', graph: 'Connected folders and the path the AI took',
+  capped: n => `Too many files; drew the first ${n}.`, folders: n => `${n} folders`,
+  home: 'Reset view', zoomIn: 'Zoom in', zoomOut: 'Zoom out',
+  allFiles: 'Show all files', allFilesTip: 'When off, the map shows only the files the AI searched, read or wrote, and their folders.', fresh: 'As the AI works, each file it searches, reads or writes and each site it visits is added here.',
+  old: 'An older Pathnote is still running. Restart Claude (or the app that runs Pathnote).',
+  reveal: mac ? 'Show in Finder' : 'Show in folder', links: n => `${n} connected`, steps: n => `${n} in activity`,
+  ask: 'The AI wants to use this folder too', askHint: 'If you allow it, the AI can find, read and write files in it. To change this later, edit ~/.pathnote/folders.json.',
+  yes: 'Allow', no: 'Decline', connected: 'connect folder', declined: 'declined', expired: 'no answer',
+  blocked: 'macOS is blocking these folders, so they look empty: ', allow: ' Allow them in System Settings → Privacy & Security → Files and Folders for the app that runs Pathnote (e.g. Claude), then reload.'
+};
+document.documentElement.lang = ko ? 'ko' : 'en';
+document.getElementById('logTitle').textContent = L.activity;
+document.getElementById('clear').textContent = L.clear;
+// Developer mode: the commands and tool calls as the AI made them. Remembered on this computer.
+const devBtn = document.getElementById('dev'), logBox = document.querySelector('.log');
+devBtn.textContent = L.dev;
+const setDev = on => { logBox.classList.toggle('dev', on); devBtn.setAttribute('aria-pressed', String(on)); try { localStorage.setItem('pathnote.dev', on ? '1' : ''); } catch {} };
+try { setDev(localStorage.getItem('pathnote.dev') === '1'); } catch { setDev(false); }
+devBtn.onclick = () => setDev(!logBox.classList.contains('dev'));
+// The map shows only what the AI used, unless every file is asked for. Remembered on this computer; switching
+// draws the page again, and the server sends the path so far again
+let allFiles = false;
+try { allFiles = localStorage.getItem('pathnote.allFiles') === '1'; } catch {}
+const allBtn = document.getElementById('allFiles');
+allBtn.textContent = L.allFiles; allBtn.title = L.allFilesTip; allBtn.setAttribute('aria-pressed', String(allFiles));
+allBtn.onclick = () => { try { localStorage.setItem('pathnote.allFiles', allFiles ? '' : '1'); } catch {} location.reload(); };
+document.getElementById('hint').textContent = L.wait;
+document.getElementById('reveal').textContent = L.reveal;
+for (const id of ['home', 'zoomIn', 'zoomOut']) {
+  const b = document.getElementById(id);
+  b.title = L[id]; b.setAttribute('aria-label', L[id]);
+}
+
+// The oldest server this page works with (the Finder route came in 0.3.1)
+const PAGE_NEEDS = '0.3.1';
+const older = (a, b) => {
+  const x = a.split('.').map(Number), y = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0);
+  return false;
+};
+const NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('g');
+svg.setAttribute('aria-label', L.graph);
+const view = el('g'), gTree = el('g'), gLinks = el('g'), gTrail = el('g'), gNodes = el('g'), gRings = el('g'), gLabels = el('g'), gPulse = el('g', { id: 'pulse' });
+const gFlags = el('g'), gFlow = el('g'); // ripples on steps worth another look; arrows of one request's flow
+gPulse.append(el('circle', { class: 'pulse' }));
+gPulse.style.display = 'none';
+view.append(gTree, gLinks, gTrail, gFlags, gNodes, gRings, gFlow, gLabels, gPulse);
+// Names live in their own layer above every dot and line, so a neighbour's dot or a path never covers one.
+// Each name sits in a copy of its node's group and takes on the node's classes whenever they change,
+// so every rule that shows, dims or hides a name keeps working without touching the code that sets them
+// The dashed ring of a search hit and the ring of a selected dot work the same way, in a layer of their own, and
+// exist only while a node has one: a ring on every node made each restyle go through thousands more elements
+new MutationObserver(rs => {
+  for (const { target: g } of rs) {
+    if (!g.label) continue;
+    const cls = g.getAttribute('class');
+    g.label.setAttribute('class', cls);
+    const ringed = g.classList.contains('hit') || g.classList.contains('sel');
+    if (ringed && !g.ring) {
+      const [cx, cy] = pos.get(g.dataset.id);
+      g.ring = el('g'); g.ring.append(el('circle', { class: 'ring', cx, cy }));
+      gRings.append(g.ring);
+    } else if (!ringed && g.ring) { g.ring.remove(); g.ring = null; }
+    g.ring?.setAttribute('class', cls);
+  }
+}).observe(gNodes, { subtree: true, attributeFilter: ['class'] });
+svg.append(view);
+const pos = new Map(), nodeEl = new Map(), angleOf = new Map(), depthOf = new Map();
+const RING = 160;
+// connected folders sit on a wide first ring so their names don't crowd the middle
+const radius = depth => (depth + 1.5) * RING;
+let current = null, vb = { x: -500, y: -500, w: 1000, h: 1000 }, anim = null;
+
+function el(tag, attrs = {}) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+// every line knows the two nodes it joins, so selecting a node can light its connections
+// and each node knows its lines, so that doesn't mean going through every line on the map (thousands)
+const linesOf = new Map();
+function ends(l, a, b) {
+  l.dataset.from = a; l.dataset.to = b;
+  for (const id of [a, b]) { if (!linesOf.has(id)) linesOf.set(id, new Set()); linesOf.get(id).add(l); }
+  return l;
+}
+const forget = l => { linesOf.get(l.dataset.from)?.delete(l); linesOf.get(l.dataset.to)?.delete(l); };
+const lines = id => linesOf.get(id) || [];
+// Paths come from the server as the computer writes them: /Users/me/a.md on a Mac, C:\Users\me\a.md on Windows
+const base = p => p.split(/[\\/]/).filter(Boolean).pop() || p;
+const parentOf = p => {
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')), d = p.slice(0, i);
+  return /^[A-Za-z]:$/.test(d) ? d + p[i] : d || '/'; // a file right on a drive (C:\a.md) sits in C:\
+};
+// p is r itself or something inside it
+const under = (p, r) => p === r || (p.startsWith(r) && (/[\\/]$/.test(r) || p[r.length] === '/' || p[r.length] === '\\'));
+
+// Radial tree: each folder gets a slice of the circle sized by how many files it holds,
+// and sits one ring further out than its parent
+function layout(items) {
+  const kids = new Map([['', []]]);
+  for (const it of items) {
+    const p = it.kind === 'root' ? '' : it.parent;
+    if (!kids.has(p)) kids.set(p, []);
+    kids.get(p).push(it.id);
+  }
+  const leaves = new Map();
+  const count = id => {
+    const c = kids.get(id) || [];
+    const n = c.length ? c.reduce((s, k) => s + count(k), 0) : 1;
+    leaves.set(id, n);
+    return n;
+  };
+  count('');
+  // a connected folder with few files still gets a readable share of the circle
+  const total = leaves.get('');
+  for (const r of kids.get('')) leaves.set(r, Math.max(leaves.get(r), total * 0.1));
+  leaves.set('', kids.get('').reduce((s, r) => s + leaves.get(r), 0));
+  const place = (id, a0, a1, depth) => {
+    const a = (a0 + a1) / 2;
+    if (id) {
+      pos.set(id, [Math.cos(a) * radius(depth), Math.sin(a) * radius(depth)]);
+      angleOf.set(id, a); depthOf.set(id, depth);
+    }
+    let at = a0;
+    const sum = (kids.get(id) || []).reduce((s, k) => s + leaves.get(k), 0);
+    for (const k of kids.get(id) || []) {
+      const span = (a1 - a0) * leaves.get(k) / sum;
+      place(k, at, at + span, depth + 1);
+      at += span;
+    }
+  };
+  place('', -Math.PI / 2, Math.PI * 1.5, 0);
+}
+
+// Redrawing (viewBox, --k for dot and label sizes, which labels show) restyles every node, which is
+// slow with thousands of files. So while a drag, wheel or glide is going on, moveView() only shifts
+// and scales the picture already drawn with a CSS transform (done by the GPU), and the real redraw,
+// setView(), runs once the movement has stopped.
+let drawn = null, settle = 0;
+function moveView() {
+  if (!drawn) return setView();
+  const s = drawn.w / vb.w, W = svg.clientWidth, H = svg.clientHeight;
+  const tx = (drawn.x - vb.x) / vb.w * W, ty = (drawn.y - vb.y) / vb.h * H;
+  svg.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+  clearTimeout(settle);
+  settle = setTimeout(setView, 150);
+}
+
+function setView() {
+  clearTimeout(settle);
+  drawn = { ...vb };
+  svg.style.transform = '';
+  svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+  const k = vb.w / Math.max(1, svg.clientWidth);
+  for (const layer of [gRings, gLabels, gPulse, gFlags, gFlow]) layer.style.setProperty('--k', k);
+  svg.classList.toggle('near', k < 1.2);
+  svg.classList.toggle('close', k < 0.5);
+  crowdLater();
+}
+
+// Names run sideways from their dots at a fixed screen size, so files next to each other print their names
+// on top of one another. Keep the one that matters most (the file the AI is on, then the selection, then what
+// it wrote, then what it went through most recently) and hide names that would cover it. Measuring is a
+// layout, so it runs once after a burst of events or when the view settles, and only while few names show
+let seen = 0, crowdTimer = 0;
+const crowdLater = () => { if (!crowdTimer) crowdTimer = setTimeout(declutter, 60); };
+function declutter() {
+  crowdTimer = 0;
+  if (anim) return; // the glide's last redraw comes back here
+  // the name's own copy too, at once: the copying runs only after this function, and the names are measured below
+  for (const g of gNodes.querySelectorAll('.crowd')) { g.classList.remove('crowd'); g.label.classList.remove('crowd'); }
+  if (svg.classList.contains('close')) return; // close in, there's room and every name shows
+  const focus = svg.classList.contains('focus');
+  const shown = [...gNodes.querySelectorAll('.root, .top, .hit, .visited, .written, .lit' + (svg.classList.contains('near') ? ', .dir' : ''))];
+  if (shown.length > 400) return;
+  const has = (g, c) => g.classList.contains(c);
+  const score = g => (g.dataset.id === current ? 6e9 : 0) + (focus && has(g, 'lit') ? 5e9 : 0) + (has(g, 'written') ? 4e9 : 0)
+    + (has(g, 'visited') || has(g, 'hit') ? 3e9 + (+g.dataset.seen || 0) : 0) + (has(g, 'root') ? 2e9 : has(g, 'top') ? 1e9 : 0);
+  const kept = [];
+  for (const g of shown.sort((a, b) => score(b) - score(a))) {
+    if (focus && !has(g, 'lit')) { g.classList.add('crowd'); continue; } // while selecting, only the lit names
+    const r = g.label.firstChild.getBoundingClientRect();
+    if (!r.width) continue;
+    if (kept.some(k => r.left < k.right + 4 && r.right > k.left - 4 && r.top < k.bottom - 2 && r.bottom > k.top + 2)) g.classList.add('crowd');
+    else kept.push(r);
+  }
+}
+
+// The view that shows every node. animate: glide there instead of jumping
+function fit(animate) {
+  const pts = [...pos.values()];
+  if (!pts.length) return setView();
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const pad = 80, x0 = Math.min(...xs) - pad, y0 = Math.min(...ys) - pad;
+  const w = Math.max(...xs) + pad - x0, h = Math.max(...ys) + pad - y0;
+  // keep the drawing's aspect so it isn't squashed in a wide panel
+  const r = svg.clientWidth / Math.max(1, svg.clientHeight);
+  // leave room for file names, which run sideways past the outermost dots
+  const label = 220 * Math.max(w, h * r) / Math.max(1, svg.clientWidth);
+  const size = Math.max(w + 2 * label, h * r);
+  const to = { x: x0 + w / 2 - size / 2, y: y0 + h / 2 - size / r / 2, w: size, h: size / r };
+  if (animate === true) return glide(to);
+  anim = null; vb = to;
+  setView();
+}
+
+// Animate the view to `to`; any drag or wheel stops it
+function glide(to) {
+  const from = { ...vb }, start = performance.now();
+  const me = anim = { to };
+  const step = now => {
+    if (anim !== me) return;
+    const t = Math.min(1, (now - start) / 450), q = t < .5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+    for (const k in vb) vb[k] = from[k] + (to[k] - from[k]) * q;
+    // a real redraw each frame keeps names and dots their size all the way, with no jump at the end;
+    // big maps move the drawn picture instead (see moveView)
+    if (t < 1) { nodeEl.size < 1500 ? setView() : moveView(); requestAnimationFrame(step); } else { anim = null; setView(); }
+  };
+  requestAnimationFrame(step);
+}
+
+// Zoom around the middle of the map by factor k (< 1 closer)
+// Quick repeated clicks add up: each starts from where the last one was heading
+function zoomBy(k) {
+  held = true;
+  const v = anim?.to || vb, cx = v.x + v.w / 2, cy = v.y + v.h / 2;
+  glide({ x: cx - v.w * k / 2, y: cy - v.h * k / 2, w: v.w * k, h: v.h * k });
+}
+
+function addNode(id, kind, top, name = base(id)) {
+  const [x, y] = pos.get(id);
+  const g = el('g', { class: `node ${kind}${top ? ' top' : ''}` });
+  g.dataset.id = id;
+  const d = `M${x} ${y}h0`; // a dot: see .node .dot
+  g.append(el('path', { class: 'dot', d }));
+  if (/\bplace\b/.test(kind)) g.append(el('path', { class: 'hole', d }));
+  const a = angleOf.get(id) ?? 0, right = Math.cos(a) >= 0;
+  const t = el('text', { x, y, dx: right ? '0.9em' : '-0.9em', dy: '0.35em', 'text-anchor': right ? 'start' : 'end' });
+  t.textContent = name;
+  const title = el('title'); title.textContent = id.startsWith(PLACE) ? name : id;
+  g.append(title);
+  g.label = el('g', { class: g.getAttribute('class') });
+  g.label.append(t);
+  gNodes.append(g); gLabels.append(g.label);
+  nodeEl.set(id, g);
+}
+
+function treeLine(a, b, cls = 'tree') {
+  const [x1, y1] = pos.get(a), [x2, y2] = pos.get(b);
+  gTree.append(ends(el('line', { class: cls, x1, y1, x2, y2 }), a, b));
+}
+
+async function loadGraph() {
+  const g = await (await fetch('/api/graph')).json();
+  document.getElementById('roots').textContent = g.roots.map(base).join(', ');
+  document.getElementById('roots').title = g.roots.join('\n');
+  const empty = document.getElementById('empty');
+  empty.hidden = g.items.some(i => i.kind !== 'root') && !g.capped;
+  empty.textContent = g.capped ? L.capped(g.items.length) : L.empty;
+  const note = document.getElementById('note');
+  note.hidden = !g.blocked?.length;
+  if (g.blocked?.length) {
+    note.textContent = '';
+    const b = document.createElement('b'); b.textContent = L.blocked + g.blocked.map(base).join(', ') + '.';
+    note.append(b, L.allow);
+  }
+  if (allFiles) {
+    layout(g.items);
+    const isRoot = new Set(g.roots);
+    for (const it of g.items) if (it.parent && pos.has(it.parent)) treeLine(it.parent, it.id);
+    for (const it of g.items) addNode(it.id, it.kind, it.kind === 'dir' && isRoot.has(it.parent));
+    for (const [a, b] of g.links) link(a, b);
+  } else {
+    // only the connected folders to start with; use() adds the rest as the AI gets to it
+    g.items.forEach((it, i) => known.set(it.id, { ...it, i }));
+    order = g.items.length;
+    for (const [a, b] of g.links) for (const [x, y] of [[a, b], [b, a]]) { if (!linksAt.has(x)) linksAt.set(x, []); linksAt.get(x).push(y); }
+    const roots = g.items.filter(it => it.kind === 'root');
+    for (const it of roots) shown.set(it.id, known.get(it.id));
+    layout(roots);
+    for (const it of roots) addNode(it.id, it.kind, false);
+    empty.hidden = false; empty.textContent = L.fresh; empty.classList.add('low');
+  }
+  fit();
+}
+const link = (a, b) => {
+  const [x1, y1] = pos.get(a), [x2, y2] = pos.get(b);
+  gLinks.append(ends(el('line', { class: 'link', x1, y1, x2, y2 }), a, b));
+};
+
+// Only what the AI used: the connected folders, and each file or folder it searched, read or wrote, with the
+// folders it sits in. Each new one lays the map out again, so the used part keeps the room and stays readable
+const known = new Map(), shown = new Map(), linksAt = new Map(); // id -> folder item (i: its order); what's drawn; id -> notes it links to
+let order = 0, held = false; // held: the view was moved by hand, so a new file doesn't move it back
+function use(ids, kind = 'file') {
+  if (allFiles) return;
+  const add = [];
+  for (const id of ids) {
+    if (shown.has(id) || !rootsList.some(r => under(id, r))) continue;
+    // up from the file to the first folder already drawn; a file or folder made after the map was read
+    // (or past the folder walk's cap) is made up here
+    for (let p = id; !shown.has(p); p = parentOf(p)) {
+      if (parentOf(p) === p) break;
+      const it = known.get(p) || { id: p, kind: p === id ? kind : 'dir', parent: parentOf(p), i: order++ };
+      shown.set(p, it); add.push(it);
+    }
+  }
+  if (!add.length) return;
+  layout([...shown.values()].sort((a, b) => a.i - b.i));
+  for (const it of add.reverse()) { // folders before what's in them
+    if (!pos.has(it.id)) continue;
+    addNode(it.id, it.kind, it.kind === 'dir' && rootsList.includes(it.parent));
+    if (pos.has(it.parent)) treeLine(it.parent, it.id);
+    for (const b of linksAt.get(it.id) || []) if (nodeEl.has(b)) link(it.id, b);
+  }
+  reposition();
+  document.getElementById('empty').hidden = true;
+  if (!held) { clearTimeout(refit); refit = setTimeout(() => { if (!held) fit(true); }, 120); }
+}
+let refit = 0;
+
+// After a new layout: move every dot, name, ring and line to where its node is now
+const outer = new Map(); // a site or app past the edge -> how it was placed, to place it again when the rings grow
+function spot(id) {
+  const o = outer.get(id), r = outerR() + (o.far ? RING * 0.6 : 0);
+  const a = o.a ?? (angleOf.get(o.place) ?? 0) + (o.n % 2 ? -1 : 1) * Math.ceil(o.n / 2) * (90 / r);
+  pos.set(id, [Math.cos(a) * r, Math.sin(a) * r]); angleOf.set(id, a);
+}
+let flowOf = null; // the request whose arrows show
+function reposition() {
+  for (const id of outer.keys()) spot(id);
+  if (edge) ensureEdge();
+  for (const [id, g] of nodeEl) {
+    const [x, y] = pos.get(id), d = `M${x} ${y}h0`, right = Math.cos(angleOf.get(id) ?? 0) >= 0;
+    for (const n of g.querySelectorAll('.dot, .hole')) n.setAttribute('d', d);
+    const t = g.label.firstChild;
+    t.setAttribute('x', x); t.setAttribute('y', y); t.setAttribute('dx', right ? '0.9em' : '-0.9em'); t.setAttribute('text-anchor', right ? 'start' : 'end');
+    const c = g.ring?.firstChild;
+    if (c) { c.setAttribute('cx', x); c.setAttribute('cy', y); }
+  }
+  for (const l of view.querySelectorAll('line[data-from]')) {
+    const [x1, y1] = pos.get(l.dataset.from), [x2, y2] = pos.get(l.dataset.to);
+    l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+    if (l.style.strokeDasharray) l.style.strokeDasharray = Math.hypot(x2 - x1, y2 - y1);
+  }
+  for (const at of gFlags.children) if (pos.has(at.dataset.id)) { const [x, y] = pos.get(at.dataset.id); at.setAttribute('transform', `translate(${x} ${y})`); }
+  if (flowOf && gFlow.firstChild) drawFlow(flowOf);
+  setCurrent(current);
+  crowdLater();
+}
+
+const still = matchMedia('(prefers-reduced-motion: reduce)'); // the CSS rule can't stop script animations
+// One line per kind and pair of places: the AI going between the same two places again (the terminal and a
+// file, say) draws over the line already there instead of adding another, so a long session doesn't pile up
+// thousands of lines that every restyle and selection has to go through
+const lineAt = new Map();
+function line(cls, a, b, animate) {
+  const [x1, y1] = pos.get(a), [x2, y2] = pos.get(b);
+  const key = `${cls}\n${a}\n${b}`;
+  let l = lineAt.get(key);
+  if (l) l.style.opacity = '';
+  else { l = ends(el('line', { class: cls, x1, y1, x2, y2 }), a, b); lineAt.set(key, l); }
+  gTrail.append(l); // last in the path order, which selecting draws the path in
+  // Draw the line from end to end with the Web Animations API: starting a CSS transition needs a
+  // forced layout first, which lays out the whole map (thousands of elements) for every event
+  if (animate && !still.matches) {
+    const len = Math.hypot(x2 - x1, y2 - y1);
+    l.style.strokeDasharray = len;
+    l.animate({ strokeDashoffset: [len, 0] }, { duration: 600, easing: 'ease-in-out' });
+  }
+}
+
+function setCurrent(id) {
+  current = id;
+  // moving the one running pulse keeps its animation going instead of starting a new one
+  const at = nodeEl.has(id) && pos.get(id);
+  gPulse.style.display = at ? '' : 'none';
+  if (at) gPulse.setAttribute('transform', `translate(${at[0]} ${at[1]})`);
+  syncPulse();
+}
+// the pulse used to sit inside its node and fade with it when the file is gone
+const syncPulse = () => gPulse.classList.toggle('gone', !!nodeEl.get(current)?.classList.contains('gone'));
+
+// A file the AI created: put it one ring outside its folder
+function ensureNode(id, kind = 'file') {
+  use([id], kind);
+  if (pos.has(id)) return;
+  const parent = parentOf(id);
+  if (pos.has(parent)) {
+    const a = (angleOf.get(parent) ?? 0) + (Math.random() - 0.5) * 0.08, d = (depthOf.get(parent) ?? 1) + 1;
+    pos.set(id, [Math.cos(a) * radius(d), Math.sin(a) * radius(d)]); angleOf.set(id, a); depthOf.set(id, d);
+    treeLine(parent, id);
+  } else {
+    pos.set(id, [vb.x + vb.w / 2, vb.y + vb.h / 2]);
+  }
+  addNode(id, kind);
+  document.getElementById('empty').hidden = true;
+}
+
+// The AI in the middle, and around it the places it goes that aren't files: the terminal, the web, each
+// other app (MCP server), subagents. Made the first time the AI goes there, so a map with only files looks as before
+const PLACE = 'place:', AI = PLACE + 'ai';
+const SITE = PLACE + 'site:';
+const nameOf = id => id === AI ? L.ai : id.startsWith(SITE) ? (id === SITE + 'git' ? L.gitRemote : id.slice(SITE.length)) : id.startsWith(PLACE + 'app:') ? id.slice(PLACE.length + 4) : id.startsWith(PLACE) ? (L.places[id.slice(PLACE.length)] || id.slice(PLACE.length)) : base(id);
+let placed = 0, outsideApps = 0;
+function ensureAI() {
+  if (pos.has(AI)) return;
+  pos.set(AI, [0, 0]); angleOf.set(AI, 0);
+  addNode(AI, 'place ai', false, L.ai);
+  document.getElementById('empty').hidden = true;
+}
+function ensurePlace(key) {
+  ensureAI();
+  const id = PLACE + key;
+  if (pos.has(id)) return id;
+  // another app (an MCP server) is outside this computer's own tools: past the edge, in the outside color
+  if (key.startsWith('app:')) {
+    outer.set(id, { a: -Math.PI / 4 + outsideApps++ * 2.39996 }); spot(id);
+    treeLine(AI, id, 'tree world'); ensureEdge();
+    addNode(id, 'place site app', false, nameOf(id));
+    document.getElementById('empty').hidden = true;
+    return id;
+  }
+  // spread around the middle, each new one in the widest gap left (golden angle), well inside the folders' ring
+  const a = -Math.PI / 2 + placed++ * 2.39996, r = RING * 1.25;
+  pos.set(id, [Math.cos(a) * r, Math.sin(a) * r]); angleOf.set(id, a);
+  treeLine(AI, id);
+  addNode(id, 'place', false, nameOf(id));
+  document.getElementById('empty').hidden = true;
+  return id;
+}
+
+// Outside this computer: beyond the outermost ring of folders, past a dashed line that marks the edge
+const deepestRing = () => { let d = 0; for (const x of depthOf.values()) if (x > d) d = x; return d; };
+const outerR = () => radius(deepestRing()) + RING * 0.9;
+let edge = null, edgeName = null;
+function ensureEdge() {
+  const r = radius(deepestRing()) + RING * 0.45;
+  if (!edge) {
+    edge = el('circle', { class: 'edge', cx: 0, cy: 0 }); edgeName = el('text', { class: 'edgeName' });
+    edgeName.textContent = L.outside; gTree.prepend(edge, edgeName);
+  }
+  edge.setAttribute('r', r); edgeName.setAttribute('x', 0); edgeName.setAttribute('y', -r - 8);
+}
+
+// A site or service outside this computer, beyond the folders and in the direction of the place that
+// first reached it (the browser, the terminal, an app), fanned out so several don't sit on each other
+const sitesBy = new Map(); // place -> how many sites it has
+function ensureSite(host, place) {
+  const id = SITE + host;
+  // reached again from another place (the terminal after the browser): one more line, once
+  if (pos.has(id)) { if (!siteLinks.has(`${place} ${id}`)) { siteLinks.add(`${place} ${id}`); treeLine(place, id, 'tree world'); } return id; }
+  const n = sitesBy.get(place) || 0; sitesBy.set(place, n + 1);
+  // about 90px apart; a site an outside app reaches goes one step further out than that app (see spot)
+  outer.set(id, { place, n, far: place.startsWith(PLACE + 'app:') }); spot(id);
+  siteLinks.add(`${place} ${id}`); treeLine(place, id, 'tree world');
+  ensureEdge();
+  addNode(id, 'place site', false, nameOf(id));
+  return id;
+}
+const stepWay = new Map(); // step id -> the call as made, to spot a failed way tried again
+const siteLinks = new Set(), stepAt = new Map(); // 'place site' pairs drawn; step id -> its place
+
+// Each AI session draws its own path, so two sessions working at once don't get joined up
+const lastAt = new Map(), readBy = new Map();
+const who = e => e.session || '';
+const sourcesOf = e => { if (!readBy.has(who(e))) readBy.set(who(e), new Set()); return readBy.get(who(e)); };
+
+// Move along the path to a node: line from the last place this session was
+function visit(id, live, e = {}) {
+  if (!nodeEl.has(id)) return;
+  const from = lastAt.get(who(e));
+  if (from && from !== id && pos.has(from)) line('trail', from, id, live);
+  lastAt.set(who(e), id);
+  const g = nodeEl.get(id);
+  g.classList.remove('hit'); g.classList.add('visited');
+  g.dataset.seen = ++seen;
+  setCurrent(id);
+}
+
+const logEl = document.getElementById('log'), LOG_MAX = 1000;
+let nowLi = null, scrolling = 0;
+// The first sentence of a reply, or two if the first is short: what Claude did, without the details
+function gist(s) {
+  const ends = [...s.matchAll(/([.!?。]|[요다죠][.!]?)(?=\s|$)/g)].map(m => m.index + m[0].length);
+  let cut = ends.find(i => i >= 25) ?? s.length;
+  if (cut > 160) cut = 160;
+  const g = s.slice(0, cut).trim();
+  return g.length < s.length ? g.replace(/[,:;]$/, '') + (cut === 160 ? '…' : '') : g;
+}
+// Addresses in a text become links that open in a new tab
+function linkify(n) {
+  const text = n.textContent, urls = [...text.matchAll(/https?:\/\/[^\s<>"')\]]+/g)];
+  if (!urls.length) return;
+  n.textContent = '';
+  let at = 0;
+  for (const m of urls) {
+    if (m[0].endsWith('…')) continue; // cut short when the reply was shortened: not a whole address
+    const url = m[0].replace(/[.,;:]+$/, '');
+    n.append(text.slice(at, m.index));
+    const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = url;
+    n.append(a); at = m.index + url.length;
+  }
+  n.append(text.slice(at));
+}
+const span = (c, t) => { const x = document.createElement('span'); x.className = c; x.textContent = t; return x; };
+
+// A step in plain words, from what the call said about itself
+function plainStep(e) {
+  const p = e.plain;
+  if (e.tool === 'WebSearch') return L.searched(p);
+  if (e.tool === 'WebFetch') return L.fetched(p);
+  if (e.tool === 'Read') return L.read(p);
+  if (e.tool === 'Write') return L.wrote(p);
+  if (/Edit$/.test(e.tool)) return L.edited(p);
+  if (/^(Grep|Glob|LS)$/.test(e.tool)) return L.looked(p);
+  if (e.tool === 'Skill') return L.skill(p);
+  if (e.place === 'agent') return L.delegated(p);
+  if (e.place === 'shell') return p || L.ran;
+  if (e.place === 'browser') return p || L.browsed;
+  return p || e.text || e.tool;
+}
+
+function addLog(e, tool, text, live, paths = [], plain = null) {
+  document.getElementById('hint').hidden = true;
+  nowLi?.classList.remove('now'); // only the newest entry has it, so no need to go through them all
+  const li = document.createElement('li');
+  nowLi = live ? li : null;
+  if (live) li.classList.add('now');
+  if (e.type === 'undo') li.classList.add('undo');
+  if (e.type === 'prompt') li.classList.add('ask');
+  if (e.type === 'say') li.classList.add('say');
+  if (e.id) li.dataset.step = e.id;
+  if (e.quiet) li.classList.add('quiet');
+  const a = document.createElement('span'); a.className = 'tool'; a.textContent = tool;
+  // in the page's language (오후 7:08:18), not the browser's, which can differ
+  const tm = document.createElement('time'); tm.textContent = new Date(e.t).toLocaleTimeString(ko ? 'ko-KR' : undefined);
+  const b = document.createElement('span'); b.className = 'text'; b.textContent = text; b.title = e.path || (text.length > 80 ? text : '');
+  // a step has two wordings: plain (.p) and as the call was made (.d), and the switch picks one
+  if (plain) {
+    a.textContent = ''; b.textContent = '';
+    a.append(span('p', plain.tool), span('d', tool));
+    b.append(span('p', plain.text), span('d', text));
+  }
+  li.append(a, tm, b);
+  if (paths.length) {
+    li.tabIndex = 0;
+    li.paths = paths;
+    li.onclick = ev => { if (!ev.target.closest('button, a')) selectEntry(li); };
+    li.onkeydown = ev => { if (ev.key === 'Enter' && ev.target === li) selectEntry(li); };
+  }
+  if (e.reason) { const w = document.createElement('span'); w.className = plain ? 'why d' : 'why'; w.textContent = e.reason; li.append(w); }
+  // a file outside the connected folders (it isn't on the map): a button to show it in Finder
+  if (e.type === 'step' && e.place === 'files' && /^(\/|[A-Za-z]:[\\/])/.test(e.text || '')) {
+    const btn = document.createElement('button');
+    btn.className = 'btn'; btn.type = 'button'; btn.textContent = L.reveal;
+    btn.onclick = async ev => {
+      ev.stopPropagation();
+      const res = await fetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: e.text }) });
+      if (!res.ok) li.append(span('err', (await res.json()).error));
+    };
+    li.append(btn);
+  }
+  for (const n of li.querySelectorAll('.text span, .text')) if (!n.children.length) linkify(n);
+  if (e.changeId && e.type !== 'undo') {
+    const btn = document.createElement('button');
+    btn.className = 'btn'; btn.type = 'button'; btn.textContent = L.undo; btn.dataset.change = e.changeId;
+    btn.onclick = async () => {
+      btn.disabled = true;
+      const res = await fetch('/api/undo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: e.changeId }) });
+      if (!res.ok) {
+        const err = document.createElement('span'); err.className = 'err';
+        err.textContent = (await res.json()).error; li.append(err); btn.disabled = false;
+      }
+    };
+    li.append(btn);
+  }
+  // Claude Code requests head a group: what came of it at a glance, its steps folded under it
+  if (e.source === 'claude-code' && e.session) { if (e.type === 'prompt') startGroup(li, e, live); else joinGroup(li, e, live); }
+  // step words and reasons; not a request's line under it, which is the session's name
+  for (const n of li.querySelectorAll(e.type === 'prompt' ? '.text .p' : '.text .p, .why')) toKorean(n);
+  logEl.append(li);
+  // A long session would keep adding entries for hours; the server keeps the last 500 events anyway
+  if (logEl.childElementCount > LOG_MAX) logEl.firstElementChild.remove();
+  // Reading scrollHeight forces a layout of the whole page, map included. Doing it once after the events
+  // waiting in the queue means a burst (or the replay of up to 500 when the page opens) costs one layout,
+  // not one each. A timer rather than requestAnimationFrame keeps it out of the frame that paints the map.
+  if (!scrolling) scrolling = setTimeout(() => { scrolling = 0; scrollLog(logEl.scrollHeight - logEl.clientHeight); });
+  return li;
+}
+
+// Glide the log to the newest entry instead of jumping a whole row at a time
+let logGlide = 0;
+function scrollLog(to) {
+  const from = logEl.scrollTop, start = performance.now(), me = ++logGlide;
+  if (still.matches || Math.abs(to - from) > logEl.clientHeight * 2) { logEl.scrollTop = to; return; } // a replay jumps
+  const step = now => {
+    if (me !== logGlide) return;
+    const t = Math.min(1, (now - start) / 450);
+    logEl.scrollTop = from + (to - from) * (t < .5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2); // eases in too: no jolt on the first frame
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+// Show paths shortly: the connected folder's name, then the rest
+function short(p) {
+  const root = rootsList.find(r => under(p, r));
+  return root ? base(root) + p.slice(root.length) : p;
+}
+let rootsList = [];
+
+function onEvent(e, live) {
+  // Claude Code sessions seen here, newest last, for the blueprint panel
+  if (e.source === 'claude-code' && e.session) {
+    const was = bpSessions.get(e.session);
+    bpSessions.delete(e.session);
+    bpSessions.set(e.session, e.title || was || (e.type === 'prompt' ? e.text.slice(0, 40) : e.session.slice(0, 8)));
+  }
+  crowdLater();
+  // Claude Code's own tools come with their names (Read, Bash, ...); Pathnote's tools with theirs
+  const tool = name => e.tool || name;
+  if (e.type === 'prompt') {
+    // a request starts the session's path again from the AI in the middle
+    ensureAI();
+    lastAt.set(who(e), AI);
+    readBy.delete(who(e)); // what it writes from now on comes from what it reads for this request
+    nodeEl.get(AI).classList.add('visited');
+    setCurrent(AI);
+    addLog({ ...e, reason: e.title }, L.you, e.text, live, [AI]);
+  } else if (e.type === 'say') {
+    // replies are written in markdown: plain words drop its marks (code ticks, bold, table bars)
+    const words = e.text.replace(/`|\*\*|^#+\s*/gm, '').replace(/\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?/g, ' ').replace(/\s*\|\s*/g, ' ').replace(/\s+/g, ' ').trim();
+    // and only the gist: its first sentence (two if the first is short); the whole reply shows on hover
+    const li = addLog(e, L.claude, e.text, live, [], { tool: L.claude, text: gist(words) });
+    li.querySelector('.text').title = words;
+  } else if (e.type === 'step') {
+    // another app's tool (mcp__<app>__<tool>): the app's name, then the tool as the text
+    const app = /^mcp__(.+?)__(.+)$/.exec(e.tool);
+    const raw = [app ? app[1] : e.tool, app && e.text === app[2] ? app[2] : e.text || ''];
+    // steps about the conversation itself don't move the path; developer mode lists them
+    if (e.quiet) { addLog(e, raw[0], raw[1], live); return; }
+    const id = ensurePlace(e.place);
+    visit(id, live, e);
+    stepAt.set(e.id, id); stepWay.set(e.id, e.place === 'browser' ? e.plain : e.text || e.plain);
+    // then out to each site or service it reached
+    if (e.out && e.place.startsWith('app:')) nodeEl.get(id)?.classList.add('out');
+    const sites = (e.hosts || []).map(h => ensureSite(h, id));
+    for (const sid of sites) { visit(sid, live, e); if (e.out) nodeEl.get(sid)?.classList.add('out'); }
+    const li = addLog(e, raw[0], raw[1], live, [id, ...sites], { tool: nameOf(id), text: plainStep(e) });
+    if (e.out && li) { li.classList.add('out'); li.append(span('outtag', L.outTag)); }
+  } else if (e.type === 'reach') {
+    // a command's output named services it talked to: hang them off its place, and on its entry
+    const place = stepAt.get(e.id);
+    if (!place || !pos.has(place)) return;
+    const li = logEl.querySelector(`[data-step="${CSS.escape(e.id)}"]`);
+    for (const h of e.hosts) {
+      const sid = ensureSite(h, place);
+      nodeEl.get(sid)?.classList.add('visited');
+      if (li?.paths && !li.paths.includes(sid)) li.paths.push(sid);
+      if (li?.classList.contains('out')) nodeEl.get(sid)?.classList.add('out');
+    }
+  } else if (e.type === 'fail') {
+    const li = logEl.querySelector(`[data-step="${CSS.escape(e.id)}"]`);
+    if (li) {
+      li.classList.add('failed');
+      li.append(span('err d', L.failed + e.text), span('err p', L.stepFailed));
+      const g = groupOf.get(Number(li.dataset.g));
+      if (g) { g.fails++; syncGroup(g); const st = stepWay.get(e.id); if (st) g.failedWays.add(st); }
+    }
+  } else if (e.type === 'search') {
+    use(e.hits);
+    for (const h of e.hits) { const g = nodeEl.get(h); if (g) { g.classList.add('hit'); g.dataset.seen = ++seen; } }
+    addLog(e, tool('search_files'), L.search(e.query, e.hits.length), live, e.hits, { tool: L.fileTool.search, text: L.search(e.query, e.hits.length) });
+  } else if (e.type === 'list') {
+    use([e.path], 'dir');
+    visit(e.path, live, e);
+    const dir = short(e.path) + (/^[A-Za-z]:\\/.test(e.path) ? '\\' : '/'); // a folder ends with the computer's separator
+    addLog(e, tool('list_files'), dir, live, [e.path], { tool: L.fileTool.list, text: dir });
+  } else if (e.type === 'read') {
+    use([e.path]);
+    visit(e.path, live, e);
+    if (nodeEl.has(e.path)) sourcesOf(e).add(e.path);
+    addLog(e, tool('read_file'), short(e.path), live, [e.path], { tool: L.fileTool.read, text: short(e.path) });
+  } else if (e.type === 'write' || e.type === 'edit') {
+    ensureNode(e.path);
+    for (const s of sourcesOf(e)) if (s !== e.path && pos.has(s)) line('src', s, e.path, live);
+    const g = nodeEl.get(e.path);
+    g.classList.remove('gone'); g.classList.add('written');
+    g.dataset.seen = ++seen;
+    lastAt.set(who(e), e.path);
+    setCurrent(e.path);
+    const said = e.created ? `${short(e.path)} (${L.created})` : short(e.path);
+    addLog(e, tool(e.type === 'write' ? 'write_file' : 'edit_file'), said, live, [e.path], { tool: L.fileTool[e.type], text: said });
+  } else if (e.type === 'move') {
+    use([e.from], e.dir ? 'dir' : 'file');
+    visit(e.from, live, e);
+    ensureNode(e.path, e.dir ? 'dir' : 'file');
+    if (pos.has(e.from)) line('src', e.from, e.path, live);
+    nodeEl.get(e.from)?.classList.add('gone');
+    const g = nodeEl.get(e.path);
+    g.classList.remove('gone'); g.classList.add('written');
+    lastAt.set(who(e), e.path);
+    setCurrent(e.path);
+    addLog(e, 'move_file', `${short(e.from)} → ${short(e.path)}`, live, [e.from, e.path], { tool: L.fileTool.move, text: `${short(e.from)} → ${short(e.path)}` });
+  } else if (e.type === 'ask') {
+    asks.set(e.id, e); showAsk();
+  } else if (e.type === 'answered') {
+    asks.delete(e.id); showAsk();
+    addLog(e, 'connect_folder', e.yes ? short(e.path) : `${e.path} (${e.yes === false ? L.declined : L.expired})`, live);
+  } else if (e.type === 'roots') {
+    // a folder was added: draw the new map (the path so far comes back from the server's events)
+    if (live) location.reload();
+  } else if (e.type === 'undo') {
+    if (e.back) nodeEl.get(e.back)?.classList.remove('gone');
+    if (e.created) {
+      nodeEl.get(e.path)?.classList.add('gone');
+      gTrail.querySelectorAll(`[data-to="${CSS.escape(e.path)}"]`).forEach(l => l.style.opacity = 0);
+    }
+    syncPulse();
+    logEl.querySelectorAll(`[data-change="${e.changeId}"]`).forEach(b => { b.disabled = true; b.textContent = L.undone; });
+    // a change undone later may not have been needed
+    for (const b of logEl.querySelectorAll(`[data-change="${e.changeId}"]`)) {
+      const li = b.closest('li'), g = groupOf.get(Number(li?.dataset.g));
+      if (!li || li.classList.contains('flag')) continue;
+      if (g) flag(g, li, L.undoneSug, e.path, live);
+      else { li.classList.add('flag'); li.append(span('flagwhy', L.sug + L.undoneSug)); ripple(e.path); }
+    }
+    addLog(e, 'undo', short(e.path), live, [e.path]);
+  }
+}
+
+// ---- One group per request ----
+// The newest request of each session stays open; when the next one comes, the one before folds away
+const groups = new Map(), groupOf = new Map(); // session -> its open group; group id -> group
+let groupSeq = 0;
+const CORRECTS = /잘못|아니야|아니라|틀렸|다시 해|말고|그게 아니|wrong|not what|instead|that's not/i;
+function startGroup(li, e, live) {
+  const was = groups.get(e.session);
+  if (was) setOpen(was, false);
+  // a request that corrects the one before: that one could have said more
+  if (was && CORRECTS.test(e.text)) flag(was, was.head, L.corrected, AI, live, 'corrected');
+  const g = { id: ++groupSeq, head: li, items: [], steps: 0, outs: 0, fails: 0, sites: new Set(), open: true, flags: 0, seen: new Map(), reads: new Map(), failedWays: new Set() };
+  const sum = document.createElement('div'); sum.className = 'sum';
+  g.res = span('res', ''); g.stats = span('stats', '');
+  g.more = document.createElement('button'); g.more.type = 'button'; g.more.className = 'more';
+  g.more.onclick = ev => { ev.stopPropagation(); setOpen(g, !g.open); };
+  sum.append(g.res, g.stats, g.more); li.append(sum);
+  groups.set(e.session, g); groupOf.set(g.id, g);
+  li.dataset.g = g.id;
+  syncGroup(g);
+}
+function joinGroup(li, e, live) {
+  const g = groups.get(e.session);
+  if (!g) return;
+  g.items.push(li); li.dataset.g = g.id;
+  if (!g.open) li.classList.add('folded');
+  if (e.type === 'say') { const said = li.querySelector('.text .p')?.textContent || e.text; g.res.textContent = L.resultL + said; linkify(g.res); if (!g.res.querySelector('a')) toKorean(g.res, said); }
+  else if (['step', 'read', 'write', 'edit', 'move', 'list', 'search'].includes(e.type) && !e.quiet) {
+    g.steps++;
+    if (e.out) g.outs++;
+    for (const h of e.hosts || []) g.sites.add(h === 'git' ? L.gitRemote : h);
+    // worth doing differently: the same step again and again, a failed way tried again, a file read over and over
+    // a browser action is its description (the tool's name, "computer", says nothing); none, no judging
+    const way = e.type !== 'step' ? `${e.type} ${e.path}` : e.place === 'browser' ? e.plain : e.text || e.plain, node = li.paths?.[0];
+    const n = way ? (g.seen.get(way) || 0) + 1 : 0; if (way) g.seen.set(way, n);
+    if (!way) { /* nothing to compare */ }
+    else if (g.failedWays.has(way)) flag(g, li, L.retried, node, live);
+    else if (e.type === 'read') { const r = (g.reads.get(e.path) || 0) + 1; g.reads.set(e.path, r); if (r >= 3) flag(g, li, L.reread(r), node, live, way); }
+    else if (n >= 3 && e.type === 'step') flag(g, li, L.repeated(n), node, live, way);
+  }
+  syncGroup(g);
+}
+// Mark an entry as worth another look: a red line under it and a ripple on its dot. One mark per kind of
+// thing in a request: a step repeated more times updates the count on its first mark.
+const flagged = new Map(); // 'group key' -> the mark's text element
+function flag(g, li, why, node, live, key = null) {
+  const k = key && `${g.id} ${key}`;
+  if (k && flagged.has(k)) { const w = flagged.get(k); w.textContent = L.sug + why; delete w.dataset.en; return; }
+  li.classList.add('flag');
+  const w = span('flagwhy', L.sug + why);
+  if (li === g.head) li.querySelector('.sum')?.before(w); else li.append(w);
+  if (k) flagged.set(k, w);
+  g.flags++; syncGroup(g);
+  if (live) { li.classList.add('fresh'); setTimeout(() => li.classList.remove('fresh'), 2600); }
+  ripple(node);
+}
+function ripple(id) {
+  if (!id || !pos.has(id)) return;
+  const [x, y] = pos.get(id);
+  const at = el('g', { transform: `translate(${x} ${y})` }), inner = el('g', { style: 'scale: var(--k)' });
+  at.dataset.id = id; // moved with its node when the map is laid out again
+  inner.append(el('circle', { class: 'ripple', r: 8 }), el('circle', { class: 'ripple r2', r: 8 }), el('circle', { class: 'flagring', r: 11 }));
+  at.append(inner); gFlags.append(at);
+}
+
+function setOpen(g, open) {
+  g.open = open;
+  for (const li of g.items) li.classList.toggle('folded', !open);
+  syncGroup(g);
+}
+function syncGroup(g) {
+  const sug = g.flags ? `<b class="s">${L.sugCount(g.flags)}</b>` : '';
+  g.stats.innerHTML = g.steps || g.fails ? L.stats(g.steps, g.outs, g.fails, [...g.sites]) + (sug && ', ' + sug) : sug;
+  g.more.textContent = g.open ? L.less : L.more;
+  g.more.hidden = !g.items.length;
+}
+
+// ---- Korean words for English ones ----
+// Claude describes its steps in English. On a Korean page, the browser's own translator (Chrome's, which
+// runs on this computer) puts them in Korean; without one they stay as they are.
+const tr = { t: null, cache: new Map(), queue: [], busy: false };
+const english = s => /[A-Za-z]{3}/.test(s) && !/[가-힣]/.test(s);
+// text: the English part of the node's text (a node can start with Korean, like 결과: )
+function toKorean(n, text = n?.textContent) {
+  if (!ko || !n || !english(text)) return;
+  n.dataset.en = text;
+  if (tr.t) tr.queue.push(n), pump();
+}
+async function pump() {
+  if (tr.busy) return;
+  tr.busy = true;
+  while (tr.queue.length) {
+    const n = tr.queue.shift(), en = n.dataset.en;
+    // links stay as they are: translating would turn them back into plain text
+    if (!n.isConnected || n.querySelector('a') || !n.fit && n.textContent !== en && !n.textContent.endsWith(en)) continue;
+    try {
+      if (!tr.cache.has(en)) tr.cache.set(en, await tr.t.translate(en));
+      // a mind map line is fitted to its room again in its new words
+      if (n.fit) n.fit(tr.cache.get(en)); else n.textContent = n.textContent.replace(en, tr.cache.get(en));
+      n.title = en;
+    } catch { break; }
+  }
+  tr.busy = false;
+}
+const trBtn = document.getElementById('trOn');
+async function trStart() {
+  tr.t = await Translator.create({ sourceLanguage: 'en', targetLanguage: 'ko', monitor: m => m.addEventListener('downloadprogress', e => { trBtn.textContent = L.trGet(Math.round(e.loaded * 100)); }) });
+  trBtn.hidden = true;
+  document.querySelectorAll('[data-en]').forEach(n => tr.queue.push(n));
+  pump();
+}
+if (ko && 'Translator' in self) {
+  trBtn.textContent = L.trOn;
+  // some browsers never answer this; then the words stay in English
+  Promise.race([Translator.availability({ sourceLanguage: 'en', targetLanguage: 'ko' }), new Promise(r => setTimeout(() => r('no'), 4000))]).then(a => {
+    if (a === 'available') trStart().catch(() => {});
+    // the model has to be downloaded first, which needs a click
+    else if (a === 'downloadable' || a === 'downloading') { trBtn.hidden = false; trBtn.onclick = () => trStart().catch(() => { trBtn.hidden = true; }); }
+  }, () => {});
+}
+
+// ---- Blueprint ----
+// One piece of recorded work as a mind map and as Markdown another agent can follow (Claude Code skill,
+// Codex prompt, file). The server rebuilds it from the session's whole log; the page picks the range.
+const bp = document.getElementById('bp'), $ = id => document.getElementById(id);
+const bpSessions = new Map(); // session -> its name, as seen on this page
+for (const [id, key] of [['bpOpen', 'bp'], ['bpTitle', 'bpTitle'], ['bpClose', 'close'], ['bpSessionL', 'bpSession'], ['bpFromL', 'bpFrom'], ['bpToL', 'bpTo'], ['bpNameL', 'bpName'], ['bpClaude', 'bpClaude'], ['bpCodex', 'bpCodex'], ['bpFile', 'bpFile'], ['bpPolish', 'bpPolish'], ['bpUpdate', 'bpUpdate']]) $(id).textContent = L[key];
+$('bpMap').setAttribute('aria-label', L.bp);
+let bpRequests = [], bpSeq = 0;
+const bpSay = (t, bad = false) => { $('bpSay').textContent = t; $('bpSay').classList.toggle('bad', bad); };
+const opt = (sel, value, text) => { const o = document.createElement('option'); o.value = value; o.textContent = text; sel.append(o); };
+// The choices: recorded work seen on this page, then the Claude Code skills already saved
+$('bpOpen').onclick = async () => {
+  bp.hidden = false;
+  const sel = $('bpSession'), keep = sel.value;
+  let skills = [];
+  try { skills = (await (await fetch('/api/skills')).json()).skills || []; } catch {}
+  sel.textContent = '';
+  const group = (label, items) => { if (!items.length) return; const g = document.createElement('optgroup'); g.label = label; for (const [v, t] of items) opt(g, v, t); sel.append(g); };
+  group(L.bpWork, [...bpSessions].reverse());
+  group(L.bpSkills, skills.map(s => ['skill:' + s.name, s.name]));
+  if (!sel.options.length) { bpSay(L.bpNone, true); return; }
+  if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+  loadBlueprint(true);
+};
+$('bpClose').onclick = () => { bp.hidden = true; };
+$('bpSession').onchange = () => loadBlueprint(true);
+$('bpFrom').onchange = $('bpTo').onchange = () => loadBlueprint(false);
+let bpSkill = null; // the skill open in the panel, if one is
+async function loadBlueprint(fresh) {
+  const me = ++bpSeq, session = $('bpSession').value;
+  bpSkill = session.startsWith('skill:') ? session.slice(6) : null;
+  $('bpFrom').parentElement.hidden = $('bpTo').parentElement.hidden = !!bpSkill;
+  $('bpUpdate').hidden = !bpSkill;
+  if (bpSkill) return loadSkill(me, bpSkill);
+  const q = new URLSearchParams({ session, lang: ko ? 'ko' : 'en' });
+  if (!fresh) { if ($('bpFrom').value) q.set('from', $('bpFrom').value); if ($('bpTo').value) q.set('to', $('bpTo').value); }
+  bpSay(L.bpLoading);
+  let r;
+  try { const res = await fetch('/api/blueprint?' + q); r = await res.json(); if (!res.ok) throw new Error(r.error); } catch (e) { if (me === bpSeq) bpSay(e.message, true); return; }
+  if (me !== bpSeq) return;
+  if (fresh) {
+    // the requests of this session to choose a range from; the last one to the end by default
+    bpRequests = r.requests;
+    const from = $('bpFrom'), to = $('bpTo');
+    from.textContent = ''; to.textContent = '';
+    bpRequests.forEach(x => opt(from, x.t, `${new Date(x.t).toLocaleString(ko ? 'ko-KR' : undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} ${x.text}`));
+    opt(to, '', L.toEnd);
+    bpRequests.forEach(x => opt(to, x.t, `${new Date(x.t).toLocaleString(ko ? 'ko-KR' : undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} ${x.text}`));
+    if (bpRequests.length) { from.value = String(bpRequests[bpRequests.length - 1].t); return loadBlueprint(false); }
+  }
+  $('bpName').value = r.blueprint.title;
+  $('bpText').value = r.markdown;
+  drawMindMap(r.blueprint);
+  bpSay('');
+}
+// A skill: its own text to edit, and the same mind map split from its headings and lists
+async function loadSkill(me, name) {
+  bpSay(L.bpLoading);
+  let r;
+  try { const res = await fetch('/api/skill?' + new URLSearchParams({ name })); r = await res.json(); if (!res.ok) throw new Error(r.error); } catch (e) { if (me === bpSeq) bpSay(e.message, true); return; }
+  if (me !== bpSeq) return;
+  $('bpName').value = r.name;
+  $('bpText').value = r.text;
+  drawMindMap(r.blueprint);
+  bpSay('');
+}
+// editing a skill's text redraws its mind map
+let bpRedraw = null;
+$('bpText').addEventListener('input', () => {
+  if (!bpSkill) return;
+  clearTimeout(bpRedraw);
+  bpRedraw = setTimeout(async () => {
+    const me = bpSeq;
+    try { const r = await (await fetch('/api/skill/parse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: $('bpText').value, name: bpSkill }) })).json(); if (me === bpSeq && r.blueprint) drawMindMap(r.blueprint); } catch {}
+  }, 500);
+});
+$('bpUpdate').onclick = async () => {
+  try {
+    const res = await fetch('/api/skill/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: bpSkill, text: $('bpText').value }) });
+    const r = await res.json();
+    if (!res.ok) throw new Error(r.error);
+    bpSay(L.bpUpdated(r.file, r.backup));
+  } catch (e) { bpSay(e.message, true); }
+};
+function fitText(t, words, room) {
+  t.textContent = words;
+  if (t.getComputedTextLength() <= room) return;
+  let lo = 1, hi = words.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; t.textContent = words.slice(0, mid).trimEnd() + '…'; if (t.getComputedTextLength() <= room) lo = mid; else hi = mid - 1; }
+  t.textContent = words.slice(0, lo).trimEnd() + '…';
+}
+// a path by its file name; a skill's own words (which may hold a slash) as they are
+const fileName = f => /^(?:~|\/|[A-Za-z]:\\)/.test(f) || /[\\/][^\\/]+\.\w{1,5}$/.test(f) ? base(f) : f;
+// The blueprint drawn like the map: the AI in the middle, the files and places (terminal, web, browser)
+// around it, sites and other apps past the dashed ring, and the steps as numbered arrows from one to the
+// next. Orange: leaves a mark outside. Red: failed, with a ring on where it failed. Beside it, the steps in
+// words and what the skill needs, makes and warns about.
+function drawMindMap(b) {
+  // wide: the map with the words beside it; narrow (a phone, a small window): the words under it, so the
+  // writing isn't shrunk to fit a wide drawing into a narrow panel
+  const map = $('bpMap'), narrow = map.clientWidth > 0 && map.clientWidth < 760;
+  const W = narrow ? 600 : 960, cx = 300, cy = 300, R1 = 150, R2 = 208, R3 = 244, COL = narrow ? W : 600;
+  let H = 600;
+  map.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  map.textContent = '';
+  const add = (tag, attrs, parent = map) => { const n = el(tag, attrs); parent.append(n); return n; };
+  const label = (parent, x, y, words, cls, anchor, room) => { const t = add('text', { x, y, class: cls, 'text-anchor': anchor || 'start' }, parent); fitText(t, String(words), room); return t; };
+  // the nodes: files and places inside, sites and apps outside, in the order the steps first reach them
+  const inner = new Map(), outer = new Map(), AIN = 'ai';
+  const node = (m, id, n) => { if (!m.has(id)) m.set(id, n); return id; };
+  const fileId = f => 'f:' + fileName(f);
+  const placeOf = s => s.path || /^app:/.test(s.place || '') ? null : s.place in L.places && s.place !== 'claude' ? s.place : null;
+  const hops = b.steps.filter(s => s.place !== 'more').map(s => {
+    const path = [];
+    if (s.path) path.push(node(inner, fileId(s.path), { kind: 'file', name: fileName(s.path) }));
+    const p = placeOf(s); if (p) path.push(node(inner, 'p:' + p, { kind: 'place', name: L.places[p] }));
+    const app = /^app:(.+)/.exec(s.place || '')?.[1]; if (app) path.push(node(outer, 'a:' + app, { kind: 'app', name: app }));
+    for (const h of (s.hosts || []).slice(0, 2)) path.push(node(outer, 's:' + h, { kind: 'site', name: h, from: path[0] }));
+    if (!path.length) path.push(AIN);
+    for (const id of path) { const n = inner.get(id) || outer.get(id); if (n) { if (s.write) n.written = true; if (s.out) n.out = true; if (s.failed) n.failed = true; } }
+    return { s, path };
+  });
+  for (const f of b.prepare.reads) if (/^(?:~|\/|[A-Za-z]:\\)|\.\w{1,5}$/.test(f)) node(inner, fileId(f), { kind: 'file', name: fileName(f) });
+  for (const f of b.results.files) if (/^(?:~|\/|[A-Za-z]:\\)|\.\w{1,5}$/.test(f)) node(inner, fileId(f), { kind: 'file', name: fileName(f) });
+  for (const f of b.results.files) { const n = inner.get(fileId(f)); if (n) n.written = true; }
+  for (const x of b.outside.sites) { const n = outer.get('s:' + x.host) || outer.get(node(outer, 's:' + x.host, { kind: 'site', name: x.host })); if (x.out) n.out = true; }
+  for (const a of b.outside.apps) node(outer, 'a:' + a.name, { kind: 'app', name: a.name });
+  // where they sit: inner ones evenly from the top, outer ones toward the place that reached them, spread apart
+  const pos = new Map([[AIN, [cx, cy]]]), ang = new Map();
+  [...inner].forEach(([id], i, a) => { const t = -Math.PI / 2 + i * 2 * Math.PI / a.length; ang.set(id, t); pos.set(id, [cx + Math.cos(t) * R1, cy + Math.sin(t) * R1]); });
+  const want = [...outer].map(([id, n], i, a) => [id, ang.has(n.from) ? ang.get(n.from) : -Math.PI / 2 + (i + 0.5) * 2 * Math.PI / a.length]).sort((x, y) => x[1] - y[1]);
+  const gap = Math.min(0.42, 2 * Math.PI / Math.max(1, want.length));
+  for (let i = 1; i < want.length; i++) if (want[i][1] - want[i - 1][1] < gap) want[i][1] = want[i - 1][1] + gap;
+  for (const [id, t] of want) { ang.set(id, t); pos.set(id, [cx + Math.cos(t) * R3, cy + Math.sin(t) * R3]); }
+
+  // the ring between this computer and the outside, the spokes, and the nodes
+  if (outer.size) { add('circle', { class: 'edge', cx, cy, r: R2 }); add('text', { class: 'edgeName', x: cx, y: cy - R2 - 8 }).textContent = L.outside; }
+  for (const [id] of inner) { const [x, y] = pos.get(id); add('line', { class: 'tree', x1: cx, y1: cy, x2: x, y2: y }); }
+  for (const [id, n] of outer) { const [x, y] = pos.get(id), [fx, fy] = pos.get(n.from) || [cx, cy]; add('line', { class: 'tree world', x1: fx, y1: fy, x2: x, y2: y }); }
+  const gFlowP = add('g', {}), gNodes = add('g', {});
+  const dot = (id, n) => {
+    const [x, y] = pos.get(id), g = add('g', { class: `pn ${n.kind}${n.written ? ' written' : ''}${n.out ? ' out' : ''}` }, gNodes);
+    add('circle', { cx: x, cy: y, r: n.kind === 'file' ? 5 : n.kind === 'app' ? 8 : 7 }, g);
+    if (n.failed) { add('circle', { class: 'flagring', cx: x, cy: y, r: 13 }, g); for (const c of ['ripple', 'ripple r2']) add('circle', { class: c, cx: x, cy: y, r: 8 }, g); }
+    // inside the ring a name sits beside its dot, away from the AI; outside it, under or over the dot, where
+    // there is more room than between the dot and the drawing's edge
+    const t = ang.get(id), side = n.kind === 'file' || n.kind === 'place', right = side && Math.cos(t) > 0.2, left = side && Math.cos(t) < -0.2, below = Math.sin(t) > -0.2;
+    const lx = right ? x + 12 : left ? x - 12 : x, ly = right || left ? y + 4 : below ? y + 24 : y - 15;
+    const room = right ? COL - 14 - lx : left ? lx - 8 : 2 * Math.min(x - 8, COL - 14 - x, 130);
+    label(g, lx, ly, n.name, 'pl', right ? 'start' : left ? 'end' : 'middle', room);
+  };
+  for (const [id, n] of inner) dot(id, n);
+  for (const [id, n] of outer) dot(id, n);
+  add('circle', { class: 'pai', cx, cy, r: 13 }, gNodes);
+  add('text', { class: 'pl pai-t', x: cx, y: cy + 30, 'text-anchor': 'middle' }, gNodes).textContent = L.ai;
+
+  // the steps as numbered arrows, each from where the last one ended; the number sits on the last hop
+  let at = AIN;
+  const seen = new Map();
+  hops.forEach(({ s, path }, i) => {
+    const cls = s.failed ? 'bad' : s.out ? 'out' : '';
+    path.forEach((id, j) => {
+      const last = j === path.length - 1;
+      if (id === at) { if (last) badge(...pos.get(id), 0, -20 - (seen.get(id) || 0) * 18, i + 1, cls), seen.set(id, (seen.get(id) || 0) + 1); return; }
+      const [x1, y1] = pos.get(at), [x2, y2] = pos.get(id), k = `${at} ${id}`, n = seen.get(k) || 0; seen.set(k, n + 1);
+      add('line', { class: `pflow ${cls}`, x1, y1, x2, y2 }, gFlowP);
+      const t = 0.62, x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t, a = Math.atan2(y2 - y1, x2 - x1), deg = a * 180 / Math.PI;
+      add('path', { class: `phead ${cls}`, d: 'M-7 -5 L7 0 L-7 5 Z', transform: `translate(${x} ${y}) rotate(${deg})` }, gFlowP);
+      // the number beside the line, and further out each time the same hop comes again
+      const off = 15 + n * 19;
+      if (last) badge(x, y, -Math.sin(a) * off, Math.cos(a) * off, i + 1, cls);
+      at = id;
+    });
+  });
+  function badge(x, y, dx, dy, n, cls) {
+    add('circle', { class: `pdot ${cls}`, cx: x + dx, cy: y + dy, r: 8 }, gFlowP);
+    add('text', { class: 'flownum', x: x + dx, y: y + dy }, gFlowP).textContent = n;
+  }
+
+  // beside the map: the title and goal, the steps in words with their numbers, then what's needed, made and warned about
+  const X = narrow ? 20 : COL + 16, RW = W - X - 12;
+  let y = narrow ? 2 * cy + 24 : 34;
+  if (narrow) H = Infinity;
+  label(map, X, y, b.title, 'pt', 'start', RW); y += 22;
+  if (b.goal && b.goal !== b.title) { label(map, X, y, b.goal, 'pg', 'start', RW); y += 20; }
+  const head = text => { y += 14; label(map, X, y, text, 'ph', 'start', RW); y += 20; };
+  const rest = [
+    [L.mm.prepare, [...b.prepare.logins, ...b.prepare.reads.map(fileName)], ''],
+    [L.mm.results, b.results.files.map(fileName), ''],
+    [L.mm.pitfalls, b.pitfalls.map(p => p.step ? `${p.step}: ${p.error}` : p.error), 'bad']
+  ].filter(r => r[1].length);
+  const roomFor = H - 16 - y - 34 - rest.reduce((a, r) => a + 34 + Math.min(2, r[1].length) * 18, 0);
+  head(L.mm.steps);
+  const fits = narrow ? 20 : Math.max(3, Math.floor(roomFor / 19)), shown = hops.slice(0, hops.length > fits ? fits - 1 : fits);
+  shown.forEach(({ s }, i) => {
+    const cls = s.failed ? 'bad' : s.out ? 'out' : '';
+    add('circle', { class: `pdot ${cls}`, cx: X + 8, cy: y - 4, r: 8 });
+    add('text', { class: 'flownum', x: X + 8, y: y - 4 }).textContent = i + 1;
+    const t = label(map, X + 24, y, s.text, `ps ${cls}`, 'start', RW - 24);
+    t.fit = words => fitText(t, words, RW - 24); toKorean(t, s.text); t.fit(s.text);
+    y += 19;
+  });
+  if (hops.length > shown.length) { label(map, X + 24, y, L.mm.more(hops.length - shown.length), 'ps', 'start', RW); y += 19; }
+  for (const [name, items, cls] of rest) {
+    if (y > H - 50) break;
+    head(name);
+    for (const it of items.slice(0, Math.max(1, Math.min(2, Math.floor((H - 14 - y) / 18))))) { label(map, X, y, it, `ps ${cls}`, 'start', RW); y += 18; }
+    if (items.length > 2 && y < H - 14) { label(map, X, y, L.mm.more(items.length - 2), 'ps', 'start', RW); y += 18; }
+  }
+  if (narrow) map.setAttribute('viewBox', `0 0 ${W} ${y + 8}`);
+}
+async function saveBp(target) {
+  try {
+    const res = await fetch('/api/blueprint/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: $('bpName').value, target, text: $('bpText').value }) });
+    const r = await res.json();
+    if (!res.ok) throw new Error(r.error);
+    bpSay(`${L.bpSaved(r.file)} ${target === 'claude' ? L.bpSavedClaude(r.name) : target === 'codex' ? L.bpSavedCodex(r.name) : ''}`);
+  } catch (e) { bpSay(e.message, true); }
+}
+$('bpClaude').onclick = () => saveBp('claude');
+$('bpCodex').onclick = () => saveBp('codex');
+$('bpFile').onclick = () => saveBp('file');
+$('bpPolish').onclick = async () => {
+  try { await navigator.clipboard.writeText(`${L.bpPrompt}\n\n${$('bpText').value}`); bpSay(L.copied); } catch (e) { bpSay(e.message, true); }
+};
+
+// Folder requests waiting for the user, oldest first
+const asks = new Map(), askEl = document.getElementById('ask');
+document.getElementById('askTitle').textContent = L.ask;
+document.getElementById('askHint').textContent = L.askHint;
+document.getElementById('askYes').textContent = L.yes;
+document.getElementById('askNo').textContent = L.no;
+function showAsk() {
+  const a = asks.values().next().value;
+  askEl.hidden = !a;
+  if (!a) return;
+  askEl.dataset.id = a.id;
+  document.getElementById('askPath').textContent = a.path;
+  document.getElementById('askWhy').textContent = a.reason || '';
+}
+for (const [id, yes] of [['askYes', true], ['askNo', false]]) {
+  document.getElementById(id).onclick = async () => {
+    const id = askEl.dataset.id;
+    askEl.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    try { await fetch('/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, yes }) }); } catch {}
+    askEl.querySelectorAll('button').forEach(b => { b.disabled = false; });
+    // the server's "answered" event hides it; if the request was already answered elsewhere, hide it now
+    asks.delete(id); showAsk();
+  };
+}
+
+document.getElementById('clear').onclick = () => {
+  for (const l of lineAt.values()) forget(l);
+  gTrail.textContent = ''; lineAt.clear();
+  for (const g of nodeEl.values()) g.classList.remove('hit', 'visited', 'written');
+  setCurrent(null); lastAt.clear(); readBy.clear();
+  unfocus();
+};
+
+// ---- Selecting ----
+const card = document.getElementById('card');
+let litEls = []; // what light() and selecting lit, to unlight without searching the whole map
+let selected = null, lastTap = { id: null, t: 0 };
+
+function unfocus() {
+  crowdLater();
+  gFlow.textContent = ''; flowOf = null;
+  svg.classList.remove('focus');
+  for (const n of litEls) n.classList.remove('lit', 'sel');
+  litEls = [];
+  logEl.querySelectorAll('.sel, .touch').forEach(li => li.classList.remove('sel', 'touch'));
+  card.hidden = true;
+  selected = null;
+}
+
+// The way one request went, as numbered arrows: the AI, then each place, file or site in turn. A hop
+// already drawn isn't drawn again. Returns the dots it passes.
+function drawFlow(g) {
+  gFlow.textContent = ''; flowOf = g;
+  const seq = [AI];
+  for (const li of g.items) for (const id of (li.paths || []).slice(0, 3)) if (pos.has(id) && seq[seq.length - 1] !== id) seq.push(id);
+  const done = new Set();
+  let n = 0;
+  for (let i = 1; i < seq.length && n < 60; i++) {
+    const a = seq[i - 1], b = seq[i], key = `${a} ${b}`;
+    if (done.has(key)) continue;
+    done.add(key); n++;
+    const [x1, y1] = pos.get(a), [x2, y2] = pos.get(b);
+    gFlow.append(el('line', { class: 'flowline', x1, y1, x2, y2 }));
+    // the arrowhead and the hop's number, two thirds of the way along
+    const t = 0.66, x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t, deg = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+    const at = el('g', { transform: `translate(${x} ${y})` }), inner = el('g', { style: 'scale: var(--k)' }), turn = el('g', { transform: `rotate(${deg})` });
+    turn.append(el('path', { class: 'flowhead', d: 'M-8 -6 L8 0 L-8 6 Z' }));
+    const dot = el('circle', { class: 'flowdot', cx: 0, cy: -15, r: 8 }), num = el('text', { class: 'flownum', x: 0, y: -15 });
+    num.textContent = n;
+    inner.append(turn, dot, num); at.append(inner); gFlow.append(at);
+  }
+  return new Set(seq);
+}
+
+// Light these nodes and the lines between lit nodes
+function light(ids) {
+  crowdLater();
+  svg.classList.add('focus');
+  const lit = n => { n.classList.add('lit'); litEls.push(n); };
+  for (const id of ids) {
+    const g = nodeEl.get(id);
+    if (g) lit(g);
+    for (const l of lines(id)) if (ids.has(l.dataset.from) && ids.has(l.dataset.to)) lit(l);
+  }
+  if (ids.has(current)) lit(gPulse);
+}
+
+// How wide a lit (semibold, 11px) file name is on screen
+const nameWidth = (() => {
+  const c = document.createElement('canvas').getContext('2d');
+  return t => { c.font = `600 11px ${getComputedStyle(document.body).fontFamily}`; return c.measureText(t).width; };
+})();
+
+// Zoom smoothly so these nodes fill the map, with room for their names.
+// top, bottom: screen pixels the nodes stay clear of (the card over the map)
+function zoomTo(ids, top = 0, bottom = 0) {
+  const list = [...ids].filter(id => pos.has(id)).slice(0, 300);
+  if (!list.length) return;
+  held = true;
+  const W = Math.max(1, svg.clientWidth), H = Math.max(1, svg.clientHeight), pad = 16;
+  // Names run sideways from their dots at a fixed screen size (right of the dot on the circle's right half, left of
+  // it on the left half), so measure how far each reaches and zoom so the farthest ones just fit, not a fixed margin
+  // on both sides, which on a narrow map left the drawing small
+  const it = list.map(id => {
+    const [x, y] = pos.get(id), n = nameWidth(nameOf(id)) + 10 + pad, right = Math.cos(angleOf.get(id) ?? 0) >= 0;
+    return { x, y, L: right ? pad : n, R: right ? n : pad };
+  });
+  let s = 700 / W; // map units per screen pixel; never closer than this
+  for (const a of it) for (const b of it) { const room = W - a.R - b.L; if (room > 0) s = Math.max(s, (a.x - b.x) / room); }
+  const ys = it.map(o => o.y);
+  const room = Math.max(1, H - 60 - top - bottom);
+  s = Math.max(s, (Math.max(...ys) - Math.min(...ys)) / room);
+  const x0 = Math.min(...it.map(o => o.x - o.L * s)), x1 = Math.max(...it.map(o => o.x + o.R * s));
+  const cx = (x0 + x1) / 2, cy = (Math.max(...ys) + Math.min(...ys)) / 2;
+  // the middle of the free band, not of the whole map
+  glide({ x: cx - W * s / 2, y: cy - (top + (H - top - bottom) / 2) * s, w: W * s, h: H * s });
+}
+
+// A log entry: its files, and for each the step of the path that led to it
+function selectEntry(li) {
+  if (li.classList.contains('sel')) return unfocus();
+  unfocus();
+  li.classList.add('sel');
+  const ids = new Set(li.paths.filter(p => nodeEl.has(p)));
+  for (const id of [...ids]) for (const l of lines(id)) if (l.parentNode === gTrail && l.dataset.to === id && l.style.opacity !== '0') ids.add(l.dataset.from);
+  light(ids);
+  for (const p of li.paths) { const g = nodeEl.get(p); if (g) { g.classList.add('sel'); litEls.push(g); } }
+  // a request: its whole flow, numbered arrows from the AI through each place it went
+  const g = li.classList.contains('ask') && groupOf.get(Number(li.dataset.g));
+  if (g) { for (const id of drawFlow(g)) ids.add(id); light(ids); }
+  zoomTo(ids);
+  // draw the lit path again end to end, one line after another, so it reads as a route
+  if (!still.matches) [...gTrail.querySelectorAll('line.lit')].forEach((l, i) => {
+    const len = Math.hypot(l.x2.baseVal.value - l.x1.baseVal.value, l.y2.baseVal.value - l.y1.baseVal.value);
+    l.style.strokeDasharray = len;
+    l.animate({ strokeDashoffset: [len, 0] }, { duration: 500, delay: 200 + i * 70, easing: 'ease-in-out', fill: 'backwards' });
+  });
+}
+
+// A dot: it, everything a line joins it to, and the log entries that touched it.
+// A second click on the same dot shows it in Finder.
+function tap(id) {
+  if (!id) return unfocus();
+  const now = Date.now();
+  if (lastTap.id === id && now - lastTap.t < 400 && (!id.startsWith(PLACE) || (id.startsWith(SITE) && id !== SITE + 'git'))) { id.startsWith(SITE) ? openSite(id) : reveal(id); lastTap = { id: null, t: 0 }; return; }
+  lastTap = { id, t: now };
+  if (selected === id) return;
+  unfocus();
+  selected = id;
+  const ids = new Set([id]);
+  for (const l of lines(id)) if (l.isConnected) ids.add(l.dataset.from === id ? l.dataset.to : l.dataset.from);
+  light(ids);
+  nodeEl.get(id).classList.add('sel'); litEls.push(nodeEl.get(id));
+  let steps = 0, last = null;
+  for (const li of logEl.children) if (li.paths?.includes(id)) { li.classList.add('touch'); steps++; last = li; }
+  last?.scrollIntoView({ block: 'nearest' });
+  const place = id.startsWith(PLACE);
+  document.getElementById('cardName').textContent = nameOf(id);
+  document.getElementById('cardPath').textContent = place ? '' : short(id);
+  // a site opens in the browser; a file or folder shows in Finder (Explorer); a place has neither
+  const site = id.startsWith(SITE) && id !== SITE + 'git' && !id.startsWith(PLACE + 'app:');
+  document.getElementById('reveal').hidden = place && !site;
+  document.getElementById('reveal').textContent = site ? L.openSite : L.reveal;
+  document.getElementById('cardInfo').textContent = [L.links(ids.size - 1), steps ? L.steps(steps) : ''].filter(Boolean).join(', ');
+  document.getElementById('cardErr').textContent = '';
+  card.hidden = false;
+  // bring it and everything it connects to into view, names included, clear of the card (top left; at the
+  // bottom on narrow windows). Without this a dot clicked while zoomed in elsewhere left its neighbours off screen
+  const c = card.offsetHeight + 12, narrow = matchMedia('(max-width: 760px)').matches;
+  zoomTo(ids, narrow ? 0 : c, narrow ? c : 0);
+}
+
+async function reveal(id) {
+  const res = await fetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: id }) });
+  document.getElementById('cardErr').textContent = res.ok ? '' : (await res.json()).error;
+}
+document.getElementById('reveal').onclick = () => selected && (selected.startsWith(SITE) ? openSite(selected) : reveal(selected));
+const openSite = id => window.open(`https://${id.slice(SITE.length)}`, '_blank', 'noopener');
+document.getElementById('home').onclick = () => { held = false; unfocus(); fit(true); };
+document.getElementById('zoomIn').onclick = () => zoomBy(1 / 1.5);
+document.getElementById('zoomOut').onclick = () => zoomBy(1.5);
+
+// Drag to pan, wheel or pinch to zoom
+// A press that doesn't move is a click: on a dot it selects it, elsewhere it clears the selection
+let drag = null, hover = 0;
+// The dot nearest a point on screen, within a finger's reach (12px): found from the positions, so dots need no
+// invisible hit circles (one per file, each restyled on every zoom)
+function nodeAt(cx, cy) {
+  const r = svg.parentElement.getBoundingClientRect(), k = vb.w / r.width;
+  const x = vb.x + (cx - r.left) * k, y = vb.y + (cy - r.top) * k;
+  let best = null, d = (matchMedia('(pointer: coarse)').matches ? 20 : 12) * k;
+  for (const [id, [px, py]] of pos) {
+    const dd = Math.hypot(px - x, py - y);
+    if (dd < d && nodeEl.has(id)) { d = dd; best = id; }
+  }
+  return best;
+}
+svg.addEventListener('pointerdown', e => {
+  drag = { x: e.clientX, y: e.clientY, vb: { ...vb }, node: nodeAt(e.clientX, e.clientY), moved: false };
+  svg.setPointerCapture(e.pointerId);
+});
+svg.addEventListener('pointermove', e => {
+  if (!drag) {
+    // a pointer over a dot, checked once a frame
+    if (e.pointerType === 'mouse' && !hover) hover = requestAnimationFrame(() => { hover = 0; svg.style.cursor = nodeAt(e.clientX, e.clientY) ? 'pointer' : ''; });
+    return;
+  }
+  if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) return;
+  if (!drag.moved) { drag.moved = true; held = true; anim = null; svg.classList.add('drag'); svg.style.cursor = ''; }
+  const k = vb.w / svg.clientWidth;
+  vb.x = drag.vb.x - (e.clientX - drag.x) * k; vb.y = drag.vb.y - (e.clientY - drag.y) * k;
+  moveView();
+});
+svg.addEventListener('pointerup', e => {
+  if (drag && !drag.moved) {
+    // the first click starts zooming, so the dot may have moved from under the second click of a double-click
+    const again = lastTap.id && Date.now() - lastTap.t < 400 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 10;
+    tap(again ? lastTap.id : drag.node);
+    lastTap.x = e.clientX; lastTap.y = e.clientY;
+  }
+  drag = null; svg.classList.remove('drag');
+});
+addEventListener('keydown', e => { if (e.key === 'Escape') unfocus(); });
+svg.addEventListener('wheel', e => {
+  e.preventDefault();
+  anim = null; held = true;
+  const k = Math.exp(e.deltaY * 0.0015), r = svg.parentElement.getBoundingClientRect(); // the svg itself may be mid-transform
+  const mx = vb.x + (e.clientX - r.left) / r.width * vb.w, my = vb.y + (e.clientY - r.top) / r.height * vb.h;
+  vb = { x: mx - (mx - vb.x) * k, y: my - (my - vb.y) * k, w: vb.w * k, h: vb.h * k };
+  moveView();
+}, { passive: false });
+addEventListener('resize', fit);
+
+(async () => {
+  const info = await (await fetch('/api/info')).json();
+  rootsList = info.roots;
+  await loadGraph();
+  // The page is read from disk on each load, but the server keeps the code it started with
+  if (!info.version || older(info.version, PAGE_NEEDS)) {
+    const note = document.getElementById('note');
+    note.hidden = false; note.textContent = '';
+    const b = document.createElement('b'); b.textContent = L.old; note.append(b);
+  }
+  const status = document.getElementById('status'), statusText = document.getElementById('statusText');
+  statusText.textContent = L.off;
+  let replay = true;
+  const es = new EventSource('/api/events');
+  es.onopen = () => { status.classList.add('on'); statusText.textContent = L.live; setTimeout(() => { replay = false; }, 300); };
+  es.onerror = () => { status.classList.remove('on'); statusText.textContent = L.off; };
+  const seen = new Set(); // a reconnect replays events the page already showed
+  es.onmessage = m => {
+    const e = JSON.parse(m.data);
+    if (seen.has(e.key)) return;
+    seen.add(e.key);
+    onEvent(e, !replay);
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pathnote</title>
+<meta name="description" content="See every step your AI took: the files it searched, read and wrote, and with Claude Code its commands, web searches and other apps, drawn live on a map of your folders.">
+<style>
+/* Layout: short intro on canvas, the live app demo on a parchment band, three plain notes, install steps, then the update list */
+:root {
+  --bg: #ffffff;
+  --surface: #f5f5f7;
+  --ink: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #d2d2d7;
+  --node: #c7c7cc;
+  --accent: #0066cc;
+  --accent-soft: rgba(0, 102, 204, 0.12);
+  --font: "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", Inter, sans-serif;
+  --display: "SF Pro Display", system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", Inter, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000; --surface: #1d1d1f; --ink: #f5f5f7; --muted: #a1a1a6;
+    --line: #3a3a3c; --node: #48484a; --accent: #2997ff; --accent-soft: rgba(41, 151, 255, 0.16);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 17px/1.47 var(--font); letter-spacing: -0.374px; }
+.band { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1100px; margin: 0 auto; }
+
+.top { padding-block: 16px 0; }
+.top .wrap { display: flex; align-items: center; gap: 12px; }
+.top strong { font-weight: 600; }
+.lang { margin-left: auto; }
+
+.intro { padding-block: 48px 32px; }
+.intro .wrap { max-width: 980px; }
+h1 { font: 600 48px/1.08 var(--display); letter-spacing: -0.28px; margin: 0 0 12px; text-wrap: balance; }
+.intro p { margin: 0 0 24px; color: var(--muted); max-width: 40em; }
+.ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+.stage { background: var(--surface); padding-block: 48px; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; font: 400 14px/1 var(--font); min-height: 36px; padding: 0 18px; border-radius: 9999px; border: 1px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer; text-decoration: none; }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.big { font-size: 17px; min-height: 44px; padding: 0 22px; }
+.btn:active { transform: scale(0.95); }
+.btn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #0071e3; outline-offset: 2px; }
+.btn:disabled { opacity: .4; cursor: default; }
+
+.window { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; border-radius: 18px; background: #000; }
+.caption { margin: 12px 0 0; font-size: 14px; color: var(--muted); }
+
+.notes { padding-block: 48px; }
+.notes .wrap { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px 48px; }
+.notes h3 { font: 600 21px/1.19 var(--display); margin: 0 0 8px; }
+.notes p { margin: 0; color: var(--muted); }
+
+.join { background: var(--surface); padding-block: 80px; }
+.join .wrap { max-width: 640px; }
+.join h2 { font: 600 34px/1.2 var(--display); letter-spacing: -0.374px; margin: 0 0 8px; }
+.join > .wrap > p { margin: 0 0 24px; color: var(--muted); }
+form { display: grid; gap: 12px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; }
+.row > * { flex: 1 1 200px; min-width: 0; }
+label { font-size: 14px; color: var(--muted); display: grid; gap: 4px; }
+input, select { font: 400 17px var(--font); min-height: 44px; padding: 0 14px; border-radius: 11px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 100%; }
+.hp { position: absolute; left: -9999px; }
+#status { min-height: 1.5em; margin: 0; font-size: 14px; }
+#status.ok { color: var(--accent); }
+.fine { font-size: 12px; color: var(--muted); margin: 16px 0 0; }
+.install { background: var(--surface); padding-block: 80px; }
+.install .wrap, .join .wrap { max-width: 720px; }
+.install h2 { font: 600 34px/1.2 var(--display); letter-spacing: -0.374px; margin: 0 0 8px; }
+.install > .wrap > p { margin: 0 0 32px; color: var(--muted); }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 32px; counter-reset: step; }
+.steps > li { counter-increment: step; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 0 12px; }
+.steps > li::before { content: counter(step); grid-row: span 9; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; font: 600 14px/28px var(--font); text-align: center; }
+.steps h3 { font: 600 21px/1.19 var(--display); margin: 0 0 6px; }
+.steps p { margin: 0 0 10px; color: var(--muted); overflow-wrap: anywhere; }
+.steps a { color: var(--accent); }
+.cmd { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 12px; padding: 10px 10px 10px 14px; border-radius: 11px; background: var(--bg); border: 1px solid var(--line); }
+.cmd code { flex: 1; min-width: 0; font: 400 14px/1.6 var(--mono); letter-spacing: 0; white-space: pre; overflow-x: auto; padding-top: 4px; }
+.cmd .btn { flex: none; }
+.join { background: var(--bg); }
+footer { padding-block: 24px 48px; font-size: 12px; color: var(--muted); }
+
+@media (max-width: 833px) {
+  h1 { font-size: 34px; }
+  .notes .wrap { grid-template-columns: 1fr; gap: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="band top">
+  <div class="wrap">
+    <strong>Pathnote</strong>
+    <button class="btn lang" id="lang" type="button">English</button>
+  </div>
+</div>
+
+<header class="band intro">
+  <div class="wrap">
+    <h1 data-t="h1"></h1>
+    <p data-t="lead"></p>
+    <div class="ctas">
+      <a class="btn primary big" href="#install" data-t="ctaJoin"></a>
+      <a class="btn big" href="#demo" data-t="ctaDemo"></a>
+    </div>
+  </div>
+</header>
+
+<section class="band stage" id="demo">
+  <div class="wrap">
+    <video class="window" id="demoVideo" autoplay muted loop playsinline preload="metadata" width="1440" height="900"></video>
+    <p class="caption" data-t="demoCap"></p>
+  </div>
+</section>
+
+<section class="band notes">
+  <div class="wrap">
+    <div><h3 data-t="f1h"></h3><p data-t="f1p"></p></div>
+    <div><h3 data-t="f2h"></h3><p data-t="f2p"></p></div>
+    <div><h3 data-t="f3h"></h3><p data-t="f3p"></p></div>
+    <div><h3 data-t="f4h"></h3><p data-t="f4p"></p></div>
+  </div>
+</section>
+
+<section class="band install" id="install">
+  <div class="wrap">
+    <h2 data-t="instH"></h2>
+    <p data-t="instP"></p>
+    <ol class="steps">
+      <li>
+        <h3 data-t="s1h"></h3>
+        <p><span data-t="s1p"></span> <a href="https://nodejs.org" rel="noopener">nodejs.org</a></p>
+        <div class="cmd"><code>npx -y pathnote setup</code><button class="btn copy" type="button"></button></div>
+        <p data-t="s1win"></p>
+        <div class="cmd"><code>npx.cmd -y pathnote setup</code><button class="btn copy" type="button"></button></div>
+        <p data-t="s1sample"></p>
+        <div class="cmd"><code>npx -y pathnote --sample ~/pathnote-sample
+npx -y pathnote setup ~/pathnote-sample</code><button class="btn copy" type="button"></button></div>
+      </li>
+      <li>
+        <h3 data-t="s2h"></h3>
+        <p data-t="s2p"></p>
+      </li>
+      <li>
+        <h3 data-t="s3h"></h3>
+        <p data-t="s3p"></p>
+        <p data-t="s3more"></p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section class="band join" id="join">
+  <div class="wrap">
+    <h2 data-t="joinH"></h2>
+    <p data-t="joinP"></p>
+    <form id="form" novalidate>
+      <div class="row">
+        <label><span data-t="emailL"></span><input id="email" name="email" type="email" autocomplete="email" required></label>
+        <label><span data-t="aiL"></span>
+          <select id="ai" name="ai">
+            <option value="claude">Claude</option>
+            <option value="chatgpt">ChatGPT</option>
+            <option value="gemini">Gemini</option>
+            <option value="cursor">Cursor</option>
+            <option value="other" data-t="aiOther"></option>
+          </select>
+        </label>
+      </div>
+      <input class="hp" id="website" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <div><button class="btn primary big" id="submit" type="submit" data-t="submit"></button></div>
+      <p id="status" role="status"></p>
+    </form>
+    <p class="fine" data-t="privacy"></p>
+  </div>
+</section>
+
+<footer class="band"><div class="wrap" data-t="footer"></div></footer>
+
+<script>
+const T = {
+  ko: {
+    h1: 'AI가 어떤 길로 일했는지 처음부터 끝까지 확인하세요',
+    lead: '에이전트가 내 폴더에서 일하는 동안 검색한 파일과 읽은 순서, 새로 쓴 파일을 지도 위에 실시간으로 시각화합니다. Claude Code에서는 내 요청과 답, 실행한 명령, 웹 검색, 다른 앱 사용, 실패한 단계까지 모든 단계를 보여줍니다. 지금 무료 베타로 써볼 수 있습니다. 아래는 예시 데이터로 만든 시연입니다.',
+    ctaJoin: '무료로 시작하기', ctaDemo: '시연 보기',
+    demoLabel: '예시 폴더에서 실제 Pathnote를 실행한 화면 녹화', demoCap: '실제 앱 화면입니다. 예시 폴더에서 에이전트가 노트를 읽고 출시 공지를 써서 블로그에 올리는 동안 바깥 사이트, 실패한 단계, 제안이 지도에 나타납니다. 이어서 요청의 흐름, 사이트 카드, 설계도를 열어 봅니다.',
+    f1h: '명령어 한 줄로 연결할 수 있습니다', f1p: '한 줄이면 이 컴퓨터의 Codex, Claude Desktop, Claude Code, Cursor에 연결됩니다. Mac과 Windows에서 돌아가고, 에이전트가 일을 시작하면 지도가 브라우저에 저절로 열립니다.',
+    f2h: '모든 단계를 실시간으로 보여드립니다', f2p: '검색, 읽기, 쓰기는 일어나는 순간 폴더 지도에 표시되어 어떤 파일을 근거로 답했는지 바로 보입니다. Claude Code에서는 터미널 명령, 웹 검색, 크롬 조작, 다른 앱도 쉬운 말로 기록됩니다. 접속한 사이트와 서비스(유튜브, 구글 API, 깃허브 등)는 폴더를 둘러싼 점선 원 바깥에 다른 색으로 나타나고, 누르면 바로 열립니다. 올리기나 배포처럼 바깥에 흔적이 남는 행동은 주황색으로 표시하고, 실패한 단계도 숨기지 않습니다.',
+    f3h: '손쉽게 사고를 되돌려보세요', f3p: '에이전트가 Pathnote로 만들거나 고친 노트는 기록에 남고, 버튼 하나로 이전 상태로 돌아갑니다. 노트는 평범한 .md 파일이라 옵시디언과 같이 써도 됩니다.',
+    f4h: '작업을 설계도로 남기세요', f4p: '요청 하나의 흐름이 번호 붙은 화살표로 이어지고, 같은 일을 되풀이하거나 실패한 방법을 다시 쓴 곳은 빨간색으로 짚어 줍니다. 끝난 작업은 마인드맵 설계도로 만들어 Claude Code 스킬이나 Codex 프롬프트로 저장하면, 다른 에이전트가 같은 일을 바로 따라 할 수 있습니다.',
+    instH: '무료로 시작하기',
+    instP: 'Pathnote는 무료 베타입니다 (MIT). 모든 처리는 내 컴퓨터 안에서 일어나고, Pathnote가 어디로 보내는 것은 없습니다. Claude Code를 쓰면 Claude Code가 내 컴퓨터에 남기는 세션 기록을 읽어 화면에 보여주기만 합니다. AI가 다른 폴더를 쓰려면 내 허락을 받아야 합니다.',
+    s1h: '한 줄로 설치하기', s1p: '터미널에 붙여 넣으세요. 문서, 바탕화면, 다운로드 폴더를 연결하고 이 컴퓨터의 AI 앱에 Pathnote를 추가합니다. Node.js 20 이상이 필요합니다(Windows는 설치한 뒤 PowerShell을 새로 여세요):',
+    s1win: 'Windows PowerShell에서는 이 줄을 넣으세요. 그냥 npx로 하면 "스크립트를 실행할 수 없으므로" 오류가 날 수 있습니다.',
+    s1sample: '내 파일을 건드리지 않고 예시 노트로 먼저 써보려면 대신 이 두 줄을 넣으세요(Windows는 npx 대신 npx.cmd).',
+    s2h: 'AI 앱 다시 열기', s2p: 'AI 앱을 완전히 종료했다가 다시 열고 새 대화를 시작하세요. Mac은 ⌘Q, Windows의 Claude Desktop은 작업 표시줄 알림 영역의 아이콘에서 종료하면 됩니다.',
+    s3h: '에이전트에게 일 시키기', s3p: '"회의록이랑 고객 인터뷰 보고 다음 분기 우선순위를 새 노트로 정리해줘."처럼 부탁하면, 에이전트가 파일을 찾기 시작하는 순간 브라우저에 지도가 열립니다(127.0.0.1:4747).',
+    s3more: '다른 폴더도 쓰려면 "강의 폴더도 연결해줘"처럼 말하세요. 지도 화면에 묻는 창이 뜨고, 허락을 눌러야 연결됩니다.',
+    copy: '복사', copied: '복사됨',
+    joinH: '새 기능 소식 받기',
+    joinP: '업데이트가 나오면 이메일로 알려드립니다.',
+    emailL: '이메일', aiL: '주로 쓰는 AI', aiOther: '기타', submit: '소식 받기',
+    sending: '등록하는 중…', ok: '등록됐습니다. 새 기능이 나오면 이 주소로 알려드릴게요.',
+    badEmail: '이메일 주소를 확인해 주세요. 예: name@example.com',
+    fail: '등록하지 못했습니다. 잠시 뒤 다시 눌러 주세요.',
+    privacy: '받는 정보: 이메일, 고른 AI, 페이지 언어, 등록 시각. Pathnote 업데이트 안내에만 쓰고 다른 곳에 넘기지 않습니다. 지우고 싶으면 안내 메일에 답장하면 바로 삭제합니다.',
+    footer: 'Pathnote는 무료 베타입니다. 시연 화면의 노트와 내용은 예시입니다.'
+  },
+  en: {
+    h1: 'See every step your AI took, from start to finish',
+    lead: 'While an AI agent works in your folders, Pathnote visualizes the files it searched, the order it read them in, and the files it wrote, live on a map of your folders. With Claude Code it shows every step: your requests and its replies, the commands it ran, web searches, other apps it used, and steps that failed. The beta is free to try now; the demo below runs on sample data.',
+    ctaJoin: 'Start free', ctaDemo: 'Watch the demo',
+    demoLabel: 'Screen recording of the real Pathnote app on sample folders', demoCap: 'The real app: in sample folders, an agent reads notes, writes a launch post and puts it on a blog, while the sites it reached, a failed upload and a suggestion show on the map. Then the request\'s flow, a site\'s card and the blueprint are opened.',
+    f1h: 'Connect with one line', f1p: 'One line adds it to Codex, Claude Desktop, Claude Code and Cursor on your computer. It runs on Mac and Windows, and the map opens in your browser as soon as the agent starts working.',
+    f2h: 'Watch every step live', f2p: 'Searches, reads and writes land on the folder map as they happen, so you can see which files an answer came from. With Claude Code, terminal commands, web searches, browser actions and other apps are written in plain words. The sites and services it reaches (YouTube, Google APIs, GitHub…) appear past a dashed ring around your folders, in their own color, and open with a click. Steps that leave a mark outside, like uploading or deploying, are marked in orange, and failed steps show too.',
+    f3h: 'Roll back its work in one click', f3p: 'Every note the agent creates or edits through Pathnote is logged and can be rolled back with one button. Notes stay plain .md files, so it works alongside Obsidian.',
+    f4h: 'Turn a run into a blueprint', f4p: 'Each request\'s flow is drawn as numbered arrows, and places where the AI repeated itself or retried a way that had already failed are marked in red. Save finished work as a mind-map blueprint, as a Claude Code skill or a Codex prompt, so another agent can follow it.',
+    instH: 'Start free',
+    instP: 'Pathnote is a free beta (MIT). Everything runs on your computer, and Pathnote sends nothing anywhere. With Claude Code, it reads the session logs Claude Code keeps on your computer, only to show them on screen. The AI needs your OK to use another folder.',
+    s1h: 'Install with one line', s1p: 'Paste this into a terminal. It connects your Documents, Desktop and Downloads folders and adds Pathnote to the AI apps on your computer. Needs Node.js 20 or later (on Windows, open a new PowerShell after installing it):',
+    s1win: 'In Windows PowerShell, paste this line instead. Plain npx can stop with a "running scripts is disabled on this system" error.',
+    s1sample: 'To try it on sample notes first, so nothing of yours is touched, paste these two lines instead (on Windows, npx.cmd instead of npx).',
+    s2h: 'Reopen your AI app', s2p: 'Quit your AI app completely, open it again and start a new conversation. On a Mac press ⌘Q; on Windows, quit Claude Desktop from its icon in the taskbar notification area.',
+    s3h: 'Give the agent a task', s3p: 'Ask something like "Go through the meeting notes and customer interviews and write next quarter\'s priorities as a new note." The map opens in your browser (127.0.0.1:4747) as soon as it starts looking.',
+    s3more: 'To use another folder, say something like "connect my lecture folder too". The map asks you, and it is connected only if you click Allow.',
+    copy: 'Copy', copied: 'Copied',
+    joinH: 'Get updates',
+    joinP: 'We will email you when something new ships.',
+    emailL: 'Email', aiL: 'AI you use most', aiOther: 'Other', submit: 'Get updates',
+    sending: 'Joining…', ok: 'You are on the list. We will email this address when something new ships.',
+    badEmail: 'Check the email address, for example name@example.com',
+    fail: 'Could not sign you up. Please try again in a moment.',
+    privacy: 'What we keep: your email, the AI you picked, page language and signup time. Used only for Pathnote updates and never shared. Reply to that email and we delete it.',
+    footer: 'Pathnote is a free beta. Notes in the demo are samples.'
+  }
+};
+
+const params = new URLSearchParams(location.search);
+let lang = ['ko', 'en'].includes(params.get('lang')) ? params.get('lang')
+  : (navigator.language || '').toLowerCase().startsWith('ko') ? 'ko' : 'en';
+const t = k => T[lang][k];
+
+// The demo is the real app, recorded on sample folders in the page's language
+const video = document.getElementById('demoVideo');
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (reduce) { video.autoplay = false; video.controls = true; }
+
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-t]').forEach(n => { n.textContent = t(n.dataset.t); });
+  document.getElementById('lang').textContent = lang === 'ko' ? 'English' : '한국어';
+  document.querySelectorAll('.copy').forEach(b => { b.textContent = t('copy'); });
+  video.setAttribute('aria-label', t('demoLabel'));
+  video.poster = `/demo/demo-${lang}.jpg`;
+  if (!video.currentSrc.endsWith(`/demo/demo-${lang}.mp4`)) {
+    video.src = `/demo/demo-${lang}.mp4`;
+    if (!reduce) video.play().catch(() => {});
+  }
+}
+
+document.getElementById('lang').onclick = () => { lang = lang === 'ko' ? 'en' : 'ko'; applyLang(); };
+
+// Copy buttons next to the commands
+document.querySelectorAll('.copy').forEach(b => {
+  b.onclick = async () => {
+    try { await navigator.clipboard.writeText(b.previousElementSibling.textContent); } catch { return; }
+    b.textContent = t('copied');
+    setTimeout(() => { b.textContent = t('copy'); }, 1500);
+  };
+});
+
+// Waitlist
+const form = document.getElementById('form'), status = document.getElementById('status'), submit = document.getElementById('submit');
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  const email = document.getElementById('email').value.trim();
+  status.className = '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { status.textContent = t('badEmail'); return; }
+  submit.disabled = true; status.textContent = t('sending');
+  try {
+    const res = await fetch('/api/waitlist', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, ai: document.getElementById('ai').value, lang, source: params.get('src'), website: document.getElementById('website').value })
+    });
+    if (res.status === 400) { status.textContent = t('badEmail'); submit.disabled = false; return; }
+    if (!res.ok) throw new Error(res.status);
+    status.textContent = t('ok'); status.className = 'ok';
+    form.querySelectorAll('input, select').forEach(n => { n.disabled = true; });
+  } catch {
+    status.textContent = t('fail'); submit.disabled = false;
+  }
+});
+
+applyLang();
+</script>
+</body>
+</html>

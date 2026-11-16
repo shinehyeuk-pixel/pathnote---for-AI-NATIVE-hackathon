@@ -1,0 +1,12 @@
+{
+  "name": "pathnote",
+  "compatibility_date": "2026-09-01",
+  "pages_build_output_dir": "public",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pathnote-waitlist",
+      "database_id": "15a1d796-b093-4c62-9408-298c6a596058"
+    }
+  ]
+}

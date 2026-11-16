@@ -1,0 +1,41 @@
+{
+  "name": "pathnote",
+  "version": "0.4.6",
+  "description": "See which files your AI searched, read and wrote, live on a map of your folders. MCP server + local viewer.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "obsidian",
+    "markdown",
+    "notes",
+    "claude",
+    "ai",
+    "knowledge-graph"
+  ],
+  "homepage": "https://pathnote.pages.dev",
+  "type": "module",
+  "bin": {
+    "pathnote": "bin/pathnote.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "viewer",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "fflate": "0.8.3",
+    "unpdf": "1.9.1",
+    "zod": "^4.6.7"
+  }
+}

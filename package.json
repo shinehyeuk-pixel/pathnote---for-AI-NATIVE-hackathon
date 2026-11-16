@@ -1,0 +1,13 @@
+{
+  "name": "pathnote-landing",
+  "private": true,
+  "scripts": {
+    "db:local": "wrangler d1 execute pathnote-waitlist --local --file=./schema.sql",
+    "dev": "wrangler pages dev --port 8795",
+    "signups:local": "wrangler d1 execute pathnote-waitlist --local --command \"SELECT source, ai, lang, COUNT(*) AS n FROM waitlist GROUP BY source, ai, lang ORDER BY n DESC\"",
+    "signups": "wrangler d1 execute pathnote-waitlist --remote --command \"SELECT source, ai, lang, COUNT(*) AS n FROM waitlist GROUP BY source, ai, lang ORDER BY n DESC\""
+  },
+  "devDependencies": {
+    "wrangler": "^4.136.1"
+  }
+}
